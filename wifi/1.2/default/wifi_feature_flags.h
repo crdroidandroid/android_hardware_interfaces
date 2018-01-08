@@ -22,16 +22,18 @@ namespace hardware {
 namespace wifi {
 namespace V1_2 {
 namespace implementation {
+namespace feature_flags {
 
 class WifiFeatureFlags {
- public:
-#ifdef WIFI_HIDL_FEATURE_AWARE
-  static const bool wifiHidlFeatureAware = true;
-#else
-  static const bool wifiHidlFeatureAware = false;
-#endif // WIFI_HIDL_FEATURE_AWARE
+   public:
+    WifiFeatureFlags();
+    virtual ~WifiFeatureFlags() = default;
+
+    virtual bool isAwareSupported();
+    virtual bool isDualInterfaceSupported();
 };
 
+}  // namespace feature_flags
 }  // namespace implementation
 }  // namespace V1_2
 }  // namespace wifi

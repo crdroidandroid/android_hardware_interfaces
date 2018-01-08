@@ -20,25 +20,36 @@
 #include <utils/StrongPointer.h>
 
 #include "wifi.h"
+#include "wifi_feature_flags.h"
+#include "wifi_legacy_hal.h"
+#include "wifi_mode_controller.h"
 
 using android::hardware::configureRpcThreadpool;
 using android::hardware::joinRpcThreadpool;
+using android::hardware::wifi::V1_2::implementation::feature_flags::
+    WifiFeatureFlags;
+using android::hardware::wifi::V1_2::implementation::legacy_hal::WifiLegacyHal;
+using android::hardware::wifi::V1_2::implementation::mode_controller::
+    WifiModeController;
 
 int main(int /*argc*/, char** argv) {
-  android::base::InitLogging(argv,
-                             android::base::LogdLogger(android::base::SYSTEM));
-  LOG(INFO) << "Wifi Hal is booting up...";
+    android::base::InitLogging(
+        argv, android::base::LogdLogger(android::base::SYSTEM));
+    LOG(INFO) << "Wifi Hal is booting up...";
 
-  configureRpcThreadpool(1, true /* callerWillJoin */);
+    configureRpcThreadpool(1, true /* callerWillJoin */);
 
-  // Setup hwbinder service
-  android::sp<android::hardware::wifi::V1_2::IWifi> service =
-      new android::hardware::wifi::V1_2::implementation::Wifi();
-  CHECK_EQ(service->registerAsService(), android::NO_ERROR)
-      << "Failed to register wifi HAL";
+    // Setup hwbinder service
+    android::sp<android::hardware::wifi::V1_2::IWifi> service =
+        new android::hardware::wifi::V1_2::implementation::Wifi(
+            std::make_shared<WifiLegacyHal>(),
+            std::make_shared<WifiModeController>(),
+            std::make_shared<WifiFeatureFlags>());
+    CHECK_EQ(service->registerAsService(), android::NO_ERROR)
+        << "Failed to register wifi HAL";
 
-  joinRpcThreadpool();
+    joinRpcThreadpool();
 
-  LOG(INFO) << "Wifi Hal is terminating...";
-  return 0;
+    LOG(INFO) << "Wifi Hal is terminating...";
+    return 0;
 }

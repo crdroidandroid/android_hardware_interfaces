@@ -87,7 +87,6 @@ void ReadThread::doRead() {
     }
     ssize_t readResult = mStream->read(mStream, &mBuffer[0], requestedToRead);
     mStatus.retval = Result::OK;
-    uint64_t read = 0;
     if (readResult >= 0) {
         mStatus.reply.read = readResult;
         if (!mDataMQ->write(&mBuffer[0], readResult)) {
@@ -326,7 +325,7 @@ Return<void> StreamIn::prepareForReading(uint32_t frameSize,
     ThreadInfo threadInfo = {0, 0};
 
     // Wrap the _hidl_cb to return an error
-    auto sendError = [this, &threadInfo, &_hidl_cb](Result result) {
+    auto sendError = [&threadInfo, &_hidl_cb](Result result) {
         _hidl_cb(result, CommandMQ::Descriptor(), DataMQ::Descriptor(),
                  StatusMQ::Descriptor(), threadInfo);
 
@@ -416,7 +415,7 @@ Result StreamIn::getCapturePositionImpl(audio_stream_in_t* stream,
     // spam the log in this case.
     static const std::vector<int> ignoredErrors{ENOSYS};
     Result retval(Result::NOT_SUPPORTED);
-    if (stream->get_capture_position != NULL) return retval;
+    if (stream->get_capture_position == NULL) return retval;
     int64_t halFrames, halTime;
     retval = Stream::analyzeStatus("get_capture_position",
                                    stream->get_capture_position(stream, &halFrames, &halTime),

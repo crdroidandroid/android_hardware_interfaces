@@ -17,7 +17,7 @@
 #define ANDROID_HARDWARE_BROADCASTRADIO_V1_2_VIRTUALPROGRAM_H
 
 #include <android/hardware/broadcastradio/1.2/types.h>
-#include <broadcastradio-utils/Utils.h>
+#include <broadcastradio-utils-1x/Utils.h>
 
 namespace android {
 namespace hardware {

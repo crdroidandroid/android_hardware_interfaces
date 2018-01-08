@@ -1,4 +1,4 @@
-<compatibility-matrix version="1.0" type="framework">
+<compatibility-matrix version="1.0" type="framework" level="3">
     <hal format="hidl" optional="false">
         <name>android.hardware.audio</name>
         <version>2.0</version>
@@ -155,14 +155,6 @@
             <instance>default</instance>
         </interface>
     </hal>
-    <hal format="hidl" optional="true">
-        <name>android.hardware.health</name>
-        <version>1.0</version>
-        <interface>
-            <name>IHealth</name>
-            <instance>default</instance>
-        </interface>
-    </hal>
     <hal format="hidl" optional="false">
         <name>android.hardware.health</name>
         <version>2.0</version>
@@ -244,14 +236,6 @@
         </interface>
         <interface>
             <name>ISap</name>
-            <instance>slot1</instance>
-        </interface>
-    </hal>
-    <hal format="hidl" optional="true">
-        <name>android.hardware.radio.deprecated</name>
-        <version>1.0</version>
-        <interface>
-            <name>IOemHook</name>
             <instance>slot1</instance>
         </interface>
     </hal>

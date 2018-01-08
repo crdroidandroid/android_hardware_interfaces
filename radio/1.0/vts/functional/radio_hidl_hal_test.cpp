@@ -19,6 +19,11 @@
 void RadioHidlTest::SetUp() {
     radio =
         ::testing::VtsHalHidlTargetTestBase::getService<IRadio>(hidl_string(RADIO_SERVICE_NAME));
+    if (radio == NULL) {
+        sleep(60);
+        radio = ::testing::VtsHalHidlTargetTestBase::getService<IRadio>(
+            hidl_string(RADIO_SERVICE_NAME));
+    }
     ASSERT_NE(nullptr, radio.get());
 
     radioRsp = new (std::nothrow) RadioResponse(*this);
@@ -43,39 +48,23 @@ void RadioHidlTest::SetUp() {
     EXPECT_EQ(CardState::ABSENT, cardStatus.cardState);
 }
 
-void RadioHidlTest::TearDown() {}
-
 void RadioHidlTest::notify() {
     std::unique_lock<std::mutex> lock(mtx);
     count++;
     cv.notify_one();
 }
 
-std::cv_status RadioHidlTest::wait() {
+std::cv_status RadioHidlTest::wait(int sec) {
     std::unique_lock<std::mutex> lock(mtx);
 
     std::cv_status status = std::cv_status::no_timeout;
     auto now = std::chrono::system_clock::now();
     while (count == 0) {
-        status = cv.wait_until(lock, now + std::chrono::seconds(TIMEOUT_PERIOD));
+        status = cv.wait_until(lock, now + std::chrono::seconds(sec));
         if (status == std::cv_status::timeout) {
             return status;
         }
     }
     count--;
     return status;
-}
-
-bool RadioHidlTest::CheckGeneralError() {
-    return (radioRsp->rspInfo.error == RadioError::RADIO_NOT_AVAILABLE ||
-            radioRsp->rspInfo.error == RadioError::NO_MEMORY ||
-            radioRsp->rspInfo.error == RadioError::INTERNAL_ERR ||
-            radioRsp->rspInfo.error == RadioError::SYSTEM_ERR ||
-            radioRsp->rspInfo.error == RadioError::REQUEST_NOT_SUPPORTED ||
-            radioRsp->rspInfo.error == RadioError::CANCELLED);
-}
-
-bool RadioHidlTest::CheckOEMError() {
-    return (radioRsp->rspInfo.error >= RadioError::OEM_ERROR_1 &&
-            radioRsp->rspInfo.error <= RadioError::OEM_ERROR_25);
 }
