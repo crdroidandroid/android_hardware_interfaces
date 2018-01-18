@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2017 The Android Open Source Project
+// Copyright (C) 2018 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,8 @@
 //
 
 cc_test {
-    name: "VtsHalConfigstoreV1_1TargetTest",
+    name: "VtsHalAuthSecretV1_0TargetTest",
     defaults: ["VtsHalTargetTestDefaults"],
-    srcs: ["VtsHalConfigstoreV1_1TargetTest.cpp"],
-    static_libs: [
-        "android.hardware.configstore@1.0",
-        "android.hardware.configstore@1.1",
-    ],
+    srcs: ["VtsHalAuthSecretV1_0TargetTest.cpp"],
+    static_libs: ["android.hardware.authsecret@1.0"],
 }
-

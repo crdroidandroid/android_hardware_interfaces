@@ -89,6 +89,18 @@ IdentifierIterator end(const V2_0::ProgramSelector& sel) {
     return IdentifierIterator(sel) + 1 /* primary id */ + sel.secondaryIds.size();
 }
 
+FrequencyBand getBand(uint64_t freq) {
+    // keep in sync with
+    // frameworks/base/services/core/java/com/android/server/broadcastradio/hal2/Utils.java
+    if (freq < 30) return FrequencyBand::UNKNOWN;
+    if (freq < 500) return FrequencyBand::AM_LW;
+    if (freq < 1705) return FrequencyBand::AM_MW;
+    if (freq < 30000) return FrequencyBand::AM_SW;
+    if (freq < 60000) return FrequencyBand::UNKNOWN;
+    if (freq < 110000) return FrequencyBand::FM;
+    return FrequencyBand::UNKNOWN;
+}
+
 static bool bothHaveId(const ProgramSelector& a, const ProgramSelector& b,
                        const IdentifierType type) {
     return hasId(a, type) && hasId(b, type);
@@ -194,7 +206,7 @@ bool isSupported(const Properties& prop, const ProgramSelector& sel) {
     return false;
 }
 
-static bool isValid(const ProgramIdentifier& id) {
+bool isValid(const ProgramIdentifier& id) {
     auto val = id.value;
     bool valid = true;
 
@@ -206,8 +218,13 @@ static bool isValid(const ProgramIdentifier& id) {
     };
 
     switch (getType(id)) {
-        case IdentifierType::AMFM_FREQUENCY:
+        case IdentifierType::INVALID:
+            expect(false, "IdentifierType::INVALID");
+            break;
         case IdentifierType::DAB_FREQUENCY:
+            expect(val > 100000u, "f > 100MHz");
+        // fallthrough
+        case IdentifierType::AMFM_FREQUENCY:
         case IdentifierType::DRMO_FREQUENCY:
             expect(val > 100u, "f > 100kHz");
             expect(val < 10000000u, "f < 10GHz");
@@ -226,6 +243,15 @@ static bool isValid(const ProgramIdentifier& id) {
             expect(subchannel < 8u, "HD subch < 8");
             expect(freq > 100u, "f > 100kHz");
             expect(freq < 10000000u, "f < 10GHz");
+            break;
+        }
+        case IdentifierType::HD_STATION_NAME: {
+            while (val > 0) {
+                auto ch = static_cast<char>(val & 0xFF);
+                val >>= 8;
+                expect((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z'),
+                       "HD_STATION_NAME does not match [A-Z0-9]+");
+            }
             break;
         }
         case IdentifierType::DAB_SID_EXT: {
@@ -348,6 +374,40 @@ void updateProgramList(ProgramInfoSet& list, const ProgramListChunk& chunk) {
         info.selector.primaryId = id;
         list.erase(info);
     }
+}
+
+std::optional<std::string> getMetadataString(const V2_0::ProgramInfo& info,
+                                             const V2_0::MetadataKey key) {
+    auto isKey = [key](const V2_0::Metadata& item) {
+        return static_cast<V2_0::MetadataKey>(item.key) == key;
+    };
+
+    auto it = std::find_if(info.metadata.begin(), info.metadata.end(), isKey);
+    if (it == info.metadata.end()) return std::nullopt;
+
+    return it->stringValue;
+}
+
+V2_0::ProgramIdentifier make_hdradio_station_name(const std::string& name) {
+    constexpr size_t maxlen = 8;
+
+    std::string shortName;
+    shortName.reserve(maxlen);
+
+    auto&& loc = std::locale::classic();
+    for (char ch : name) {
+        if (!std::isalnum(ch, loc)) continue;
+        shortName.push_back(std::toupper(ch, loc));
+        if (shortName.length() >= maxlen) break;
+    }
+
+    uint64_t val = 0;
+    for (auto rit = shortName.rbegin(); rit != shortName.rend(); ++rit) {
+        val <<= 8;
+        val |= static_cast<uint8_t>(*rit);
+    }
+
+    return make_identifier(IdentifierType::HD_STATION_NAME, val);
 }
 
 }  // namespace utils
