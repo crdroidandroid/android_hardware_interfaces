@@ -22,21 +22,13 @@
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 
-#include <android/hardware/keymaster/4.0/IKeymasterDevice.h>
-#include <android/hardware/keymaster/4.0/types.h>
 #include <cutils/properties.h>
-#include <keymaster/keymaster_configuration.h>
-
-#include <VtsHalHidlTargetTestBase.h>
 
 #include <keymasterV4_0/attestation_record.h>
-#include <keymasterV4_0/authorization_set.h>
 #include <keymasterV4_0/key_param_output.h>
 #include <keymasterV4_0/openssl_utils.h>
 
-using ::android::sp;
-
-using ::std::string;
+#include "KeymasterHidlTest.h"
 
 static bool arm_deleteAllKeys = false;
 static bool dump_Attestations = false;
@@ -60,91 +52,6 @@ bool operator==(const hidl_vec<T>& a, const hidl_vec<T>& b) {
 namespace keymaster {
 namespace V4_0 {
 
-bool operator==(const KeyParameter& a, const KeyParameter& b) {
-    if (a.tag != b.tag) {
-        return false;
-    }
-
-    switch (a.tag) {
-        /* Boolean tags */
-        case Tag::INVALID:
-        case Tag::CALLER_NONCE:
-        case Tag::INCLUDE_UNIQUE_ID:
-        case Tag::BOOTLOADER_ONLY:
-        case Tag::NO_AUTH_REQUIRED:
-        case Tag::ALLOW_WHILE_ON_BODY:
-        case Tag::ROLLBACK_RESISTANCE:
-        case Tag::RESET_SINCE_ID_ROTATION:
-            return true;
-
-        /* Integer tags */
-        case Tag::KEY_SIZE:
-        case Tag::MIN_MAC_LENGTH:
-        case Tag::MIN_SECONDS_BETWEEN_OPS:
-        case Tag::MAX_USES_PER_BOOT:
-        case Tag::OS_VERSION:
-        case Tag::OS_PATCHLEVEL:
-        case Tag::MAC_LENGTH:
-        case Tag::AUTH_TIMEOUT:
-            return a.f.integer == b.f.integer;
-
-        /* Long integer tags */
-        case Tag::RSA_PUBLIC_EXPONENT:
-        case Tag::USER_SECURE_ID:
-            return a.f.longInteger == b.f.longInteger;
-
-        /* Date-time tags */
-        case Tag::ACTIVE_DATETIME:
-        case Tag::ORIGINATION_EXPIRE_DATETIME:
-        case Tag::USAGE_EXPIRE_DATETIME:
-        case Tag::CREATION_DATETIME:
-            return a.f.dateTime == b.f.dateTime;
-
-        /* Bytes tags */
-        case Tag::APPLICATION_ID:
-        case Tag::APPLICATION_DATA:
-        case Tag::ROOT_OF_TRUST:
-        case Tag::UNIQUE_ID:
-        case Tag::ATTESTATION_CHALLENGE:
-        case Tag::ATTESTATION_APPLICATION_ID:
-        case Tag::ATTESTATION_ID_BRAND:
-        case Tag::ATTESTATION_ID_DEVICE:
-        case Tag::ATTESTATION_ID_PRODUCT:
-        case Tag::ATTESTATION_ID_SERIAL:
-        case Tag::ATTESTATION_ID_IMEI:
-        case Tag::ATTESTATION_ID_MEID:
-        case Tag::ATTESTATION_ID_MANUFACTURER:
-        case Tag::ATTESTATION_ID_MODEL:
-        case Tag::ASSOCIATED_DATA:
-        case Tag::NONCE:
-            return a.blob == b.blob;
-
-        /* Enum tags */
-        case Tag::PURPOSE:
-            return a.f.purpose == b.f.purpose;
-        case Tag::ALGORITHM:
-            return a.f.algorithm == b.f.algorithm;
-        case Tag::BLOCK_MODE:
-            return a.f.blockMode == b.f.blockMode;
-        case Tag::DIGEST:
-            return a.f.digest == b.f.digest;
-        case Tag::PADDING:
-            return a.f.paddingMode == b.f.paddingMode;
-        case Tag::EC_CURVE:
-            return a.f.ecCurve == b.f.ecCurve;
-        case Tag::BLOB_USAGE_REQUIREMENTS:
-            return a.f.keyBlobUsageRequirements == b.f.keyBlobUsageRequirements;
-        case Tag::USER_AUTH_TYPE:
-            return a.f.integer == b.f.integer;
-        case Tag::ORIGIN:
-            return a.f.origin == b.f.origin;
-        case Tag::HARDWARE_TYPE:
-            return a.f.hardwareType == b.f.hardwareType;
-    }
-
-    return false;
-}
-
 bool operator==(const AuthorizationSet& a, const AuthorizationSet& b) {
     return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin());
 }
@@ -162,16 +69,6 @@ bool operator==(const KeyCharacteristics& a, const KeyCharacteristics& b) {
     b_tee.Sort();
 
     return a_sw == b_sw && a_tee == b_tee;
-}
-
-::std::ostream& operator<<(::std::ostream& os, const AuthorizationSet& set) {
-    if (set.size() == 0)
-        os << "(Empty)" << ::std::endl;
-    else {
-        os << "\n";
-        for (size_t i = 0; i < set.size(); ++i) os << set[i] << ::std::endl;
-    }
-    return os;
 }
 
 namespace test {
@@ -369,523 +266,7 @@ std::string make_string(const uint8_t (&a)[N]) {
     return make_string(a, N);
 }
 
-class HidlBuf : public hidl_vec<uint8_t> {
-    typedef hidl_vec<uint8_t> super;
-
-   public:
-    HidlBuf() {}
-    HidlBuf(const super& other) : super(other) {}
-    HidlBuf(super&& other) : super(std::move(other)) {}
-    explicit HidlBuf(const std::string& other) : HidlBuf() { *this = other; }
-
-    HidlBuf& operator=(const super& other) {
-        super::operator=(other);
-        return *this;
-    }
-
-    HidlBuf& operator=(super&& other) {
-        super::operator=(std::move(other));
-        return *this;
-    }
-
-    HidlBuf& operator=(const string& other) {
-        resize(other.size());
-        for (size_t i = 0; i < other.size(); ++i) {
-            (*this)[i] = static_cast<uint8_t>(other[i]);
-        }
-        return *this;
-    }
-
-    string to_string() const { return string(reinterpret_cast<const char*>(data()), size()); }
-};
-
-constexpr uint64_t kOpHandleSentinel = 0xFFFFFFFFFFFFFFFF;
-
 }  // namespace
-
-class KeymasterHidlEnvironment : public ::testing::VtsHalHidlTargetTestEnvBase {
-   public:
-    // get the test environment singleton
-    static KeymasterHidlEnvironment* Instance() {
-        static KeymasterHidlEnvironment* instance = new KeymasterHidlEnvironment;
-        return instance;
-    }
-
-    void registerTestServices() override { registerTestService<IKeymasterDevice>(); }
-
-   private:
-    KeymasterHidlEnvironment(){};
-
-    GTEST_DISALLOW_COPY_AND_ASSIGN_(KeymasterHidlEnvironment);
-};
-
-class KeymasterHidlTest : public ::testing::VtsHalHidlTargetTestBase {
-   public:
-    void TearDown() override {
-        if (key_blob_.size()) {
-            CheckedDeleteKey();
-        }
-        AbortIfNeeded();
-    }
-
-    // SetUpTestCase runs only once per test case, not once per test.
-    static void SetUpTestCase() {
-        string service_name =
-            KeymasterHidlEnvironment::Instance()->getServiceName<IKeymasterDevice>();
-        keymaster_ =
-            ::testing::VtsHalHidlTargetTestBase::getService<IKeymasterDevice>(service_name);
-        ASSERT_NE(keymaster_, nullptr);
-
-        ASSERT_TRUE(keymaster_
-                        ->getHardwareInfo([&](SecurityLevel securityLevel, const hidl_string& name,
-                                              const hidl_string& author) {
-                            securityLevel_ = securityLevel;
-                            name_ = name;
-                            author_ = author;
-                        })
-                        .isOk());
-
-        os_version_ = ::keymaster::GetOsVersion();
-        os_patch_level_ = ::keymaster::GetOsPatchlevel();
-    }
-
-    static void TearDownTestCase() { keymaster_.clear(); }
-
-    static IKeymasterDevice& keymaster() { return *keymaster_; }
-    static uint32_t os_version() { return os_version_; }
-    static uint32_t os_patch_level() { return os_patch_level_; }
-
-    ErrorCode GenerateKey(const AuthorizationSet& key_desc, HidlBuf* key_blob,
-                          KeyCharacteristics* key_characteristics) {
-        EXPECT_NE(key_blob, nullptr) << "Key blob pointer must not be null.  Test bug";
-        EXPECT_EQ(0U, key_blob->size()) << "Key blob not empty before generating key.  Test bug.";
-        EXPECT_NE(key_characteristics, nullptr)
-            << "Previous characteristics not deleted before generating key.  Test bug.";
-
-        ErrorCode error;
-        EXPECT_TRUE(keymaster_
-                        ->generateKey(key_desc.hidl_data(),
-                                      [&](ErrorCode hidl_error, const HidlBuf& hidl_key_blob,
-                                          const KeyCharacteristics& hidl_key_characteristics) {
-                                          error = hidl_error;
-                                          *key_blob = hidl_key_blob;
-                                          *key_characteristics = hidl_key_characteristics;
-                                      })
-                        .isOk());
-        // On error, blob & characteristics should be empty.
-        if (error != ErrorCode::OK) {
-            EXPECT_EQ(0U, key_blob->size());
-            EXPECT_EQ(0U, (key_characteristics->softwareEnforced.size() +
-                           key_characteristics->hardwareEnforced.size()));
-        }
-        return error;
-    }
-
-    ErrorCode GenerateKey(const AuthorizationSet& key_desc) {
-        return GenerateKey(key_desc, &key_blob_, &key_characteristics_);
-    }
-
-    ErrorCode ImportKey(const AuthorizationSet& key_desc, KeyFormat format,
-                        const string& key_material, HidlBuf* key_blob,
-                        KeyCharacteristics* key_characteristics) {
-        ErrorCode error;
-        EXPECT_TRUE(keymaster_
-                        ->importKey(key_desc.hidl_data(), format, HidlBuf(key_material),
-                                    [&](ErrorCode hidl_error, const HidlBuf& hidl_key_blob,
-                                        const KeyCharacteristics& hidl_key_characteristics) {
-                                        error = hidl_error;
-                                        *key_blob = hidl_key_blob;
-                                        *key_characteristics = hidl_key_characteristics;
-                                    })
-                        .isOk());
-        // On error, blob & characteristics should be empty.
-        if (error != ErrorCode::OK) {
-            EXPECT_EQ(0U, key_blob->size());
-            EXPECT_EQ(0U, (key_characteristics->softwareEnforced.size() +
-                           key_characteristics->hardwareEnforced.size()));
-        }
-        return error;
-    }
-
-    ErrorCode ImportKey(const AuthorizationSet& key_desc, KeyFormat format,
-                        const string& key_material) {
-        return ImportKey(key_desc, format, key_material, &key_blob_, &key_characteristics_);
-    }
-
-    ErrorCode ExportKey(KeyFormat format, const HidlBuf& key_blob, const HidlBuf& client_id,
-                        const HidlBuf& app_data, HidlBuf* key_material) {
-        ErrorCode error;
-        EXPECT_TRUE(
-            keymaster_
-                ->exportKey(format, key_blob, client_id, app_data,
-                            [&](ErrorCode hidl_error_code, const HidlBuf& hidl_key_material) {
-                                error = hidl_error_code;
-                                *key_material = hidl_key_material;
-                            })
-                .isOk());
-        // On error, blob should be empty.
-        if (error != ErrorCode::OK) {
-            EXPECT_EQ(0U, key_material->size());
-        }
-        return error;
-    }
-
-    ErrorCode ExportKey(KeyFormat format, HidlBuf* key_material) {
-        HidlBuf client_id, app_data;
-        return ExportKey(format, key_blob_, client_id, app_data, key_material);
-    }
-
-    ErrorCode DeleteKey(HidlBuf* key_blob, bool keep_key_blob = false) {
-        auto rc = keymaster_->deleteKey(*key_blob);
-        if (!keep_key_blob) *key_blob = HidlBuf();
-        if (!rc.isOk()) return ErrorCode::UNKNOWN_ERROR;
-        return rc;
-    }
-
-    ErrorCode DeleteKey(bool keep_key_blob = false) { return DeleteKey(&key_blob_, keep_key_blob); }
-
-    ErrorCode DeleteAllKeys() {
-        ErrorCode error = keymaster_->deleteAllKeys();
-        return error;
-    }
-
-    void CheckedDeleteKey(HidlBuf* key_blob, bool keep_key_blob = false) {
-        auto rc = DeleteKey(key_blob, keep_key_blob);
-        EXPECT_TRUE(rc == ErrorCode::OK || rc == ErrorCode::UNIMPLEMENTED);
-    }
-
-    void CheckedDeleteKey() { CheckedDeleteKey(&key_blob_); }
-
-    ErrorCode GetCharacteristics(const HidlBuf& key_blob, const HidlBuf& client_id,
-                                 const HidlBuf& app_data, KeyCharacteristics* key_characteristics) {
-        ErrorCode error = ErrorCode::UNKNOWN_ERROR;
-        EXPECT_TRUE(
-            keymaster_
-                ->getKeyCharacteristics(
-                    key_blob, client_id, app_data,
-                    [&](ErrorCode hidl_error, const KeyCharacteristics& hidl_key_characteristics) {
-                        error = hidl_error, *key_characteristics = hidl_key_characteristics;
-                    })
-                .isOk());
-        return error;
-    }
-
-    ErrorCode GetCharacteristics(const HidlBuf& key_blob, KeyCharacteristics* key_characteristics) {
-        HidlBuf client_id, app_data;
-        return GetCharacteristics(key_blob, client_id, app_data, key_characteristics);
-    }
-
-    ErrorCode Begin(KeyPurpose purpose, const HidlBuf& key_blob, const AuthorizationSet& in_params,
-                    AuthorizationSet* out_params, OperationHandle* op_handle) {
-        SCOPED_TRACE("Begin");
-        ErrorCode error;
-        OperationHandle saved_handle = *op_handle;
-        EXPECT_TRUE(
-            keymaster_
-                ->begin(purpose, key_blob, in_params.hidl_data(), HardwareAuthToken(),
-                        [&](ErrorCode hidl_error, const hidl_vec<KeyParameter>& hidl_out_params,
-                            uint64_t hidl_op_handle) {
-                            error = hidl_error;
-                            *out_params = hidl_out_params;
-                            *op_handle = hidl_op_handle;
-                        })
-                .isOk());
-        if (error != ErrorCode::OK) {
-            // Some implementations may modify *op_handle on error.
-            *op_handle = saved_handle;
-        }
-        return error;
-    }
-
-    ErrorCode Begin(KeyPurpose purpose, const AuthorizationSet& in_params,
-                    AuthorizationSet* out_params) {
-        SCOPED_TRACE("Begin");
-        EXPECT_EQ(kOpHandleSentinel, op_handle_);
-        return Begin(purpose, key_blob_, in_params, out_params, &op_handle_);
-    }
-
-    ErrorCode Begin(KeyPurpose purpose, const AuthorizationSet& in_params) {
-        SCOPED_TRACE("Begin");
-        AuthorizationSet out_params;
-        ErrorCode error = Begin(purpose, in_params, &out_params);
-        EXPECT_TRUE(out_params.empty());
-        return error;
-    }
-
-    ErrorCode Update(OperationHandle op_handle, const AuthorizationSet& in_params,
-                     const string& input, AuthorizationSet* out_params, string* output,
-                     size_t* input_consumed) {
-        SCOPED_TRACE("Update");
-        ErrorCode error;
-        EXPECT_TRUE(keymaster_
-                        ->update(op_handle, in_params.hidl_data(), HidlBuf(input),
-                                 HardwareAuthToken(), VerificationToken(),
-                                 [&](ErrorCode hidl_error, uint32_t hidl_input_consumed,
-                                     const hidl_vec<KeyParameter>& hidl_out_params,
-                                     const HidlBuf& hidl_output) {
-                                     error = hidl_error;
-                                     out_params->push_back(AuthorizationSet(hidl_out_params));
-                                     output->append(hidl_output.to_string());
-                                     *input_consumed = hidl_input_consumed;
-                                 })
-                        .isOk());
-        return error;
-    }
-
-    ErrorCode Update(const string& input, string* out, size_t* input_consumed) {
-        SCOPED_TRACE("Update");
-        AuthorizationSet out_params;
-        ErrorCode error = Update(op_handle_, AuthorizationSet() /* in_params */, input, &out_params,
-                                 out, input_consumed);
-        EXPECT_TRUE(out_params.empty());
-        return error;
-    }
-
-    ErrorCode Finish(OperationHandle op_handle, const AuthorizationSet& in_params,
-                     const string& input, const string& signature, AuthorizationSet* out_params,
-                     string* output) {
-        SCOPED_TRACE("Finish");
-        ErrorCode error;
-        EXPECT_TRUE(
-            keymaster_
-                ->finish(op_handle, in_params.hidl_data(), HidlBuf(input), HidlBuf(signature),
-                         HardwareAuthToken(), VerificationToken(),
-                         [&](ErrorCode hidl_error, const hidl_vec<KeyParameter>& hidl_out_params,
-                             const HidlBuf& hidl_output) {
-                             error = hidl_error;
-                             *out_params = hidl_out_params;
-                             output->append(hidl_output.to_string());
-                         })
-                .isOk());
-        op_handle_ = kOpHandleSentinel;  // So dtor doesn't Abort().
-        return error;
-    }
-
-    ErrorCode Finish(const string& message, string* output) {
-        SCOPED_TRACE("Finish");
-        AuthorizationSet out_params;
-        string finish_output;
-        ErrorCode error = Finish(op_handle_, AuthorizationSet() /* in_params */, message,
-                                 "" /* signature */, &out_params, output);
-        if (error != ErrorCode::OK) {
-            return error;
-        }
-        EXPECT_EQ(0U, out_params.size());
-        return error;
-    }
-
-    ErrorCode Finish(const string& message, const string& signature, string* output) {
-        SCOPED_TRACE("Finish");
-        AuthorizationSet out_params;
-        ErrorCode error = Finish(op_handle_, AuthorizationSet() /* in_params */, message, signature,
-                                 &out_params, output);
-        op_handle_ = kOpHandleSentinel;  // So dtor doesn't Abort().
-        if (error != ErrorCode::OK) {
-            return error;
-        }
-        EXPECT_EQ(0U, out_params.size());
-        return error;
-    }
-
-    ErrorCode Abort(OperationHandle op_handle) {
-        SCOPED_TRACE("Abort");
-        auto retval = keymaster_->abort(op_handle);
-        EXPECT_TRUE(retval.isOk());
-        return retval;
-    }
-
-    void AbortIfNeeded() {
-        SCOPED_TRACE("AbortIfNeeded");
-        if (op_handle_ != kOpHandleSentinel) {
-            EXPECT_EQ(ErrorCode::OK, Abort(op_handle_));
-            op_handle_ = kOpHandleSentinel;
-        }
-    }
-
-    ErrorCode AttestKey(const HidlBuf& key_blob, const AuthorizationSet& attest_params,
-                        hidl_vec<hidl_vec<uint8_t>>* cert_chain) {
-        SCOPED_TRACE("AttestKey");
-        ErrorCode error;
-        auto rc = keymaster_->attestKey(
-            key_blob, attest_params.hidl_data(),
-            [&](ErrorCode hidl_error, const hidl_vec<hidl_vec<uint8_t>>& hidl_cert_chain) {
-                error = hidl_error;
-                *cert_chain = hidl_cert_chain;
-            });
-
-        EXPECT_TRUE(rc.isOk()) << rc.description();
-        if (!rc.isOk()) return ErrorCode::UNKNOWN_ERROR;
-
-        return error;
-    }
-
-    ErrorCode AttestKey(const AuthorizationSet& attest_params,
-                        hidl_vec<hidl_vec<uint8_t>>* cert_chain) {
-        SCOPED_TRACE("AttestKey");
-        return AttestKey(key_blob_, attest_params, cert_chain);
-    }
-
-    string ProcessMessage(const HidlBuf& key_blob, KeyPurpose operation, const string& message,
-                          const AuthorizationSet& in_params, AuthorizationSet* out_params) {
-        SCOPED_TRACE("ProcessMessage");
-        AuthorizationSet begin_out_params;
-        EXPECT_EQ(ErrorCode::OK,
-                  Begin(operation, key_blob, in_params, &begin_out_params, &op_handle_));
-
-        string unused;
-        AuthorizationSet finish_params;
-        AuthorizationSet finish_out_params;
-        string output;
-        EXPECT_EQ(ErrorCode::OK,
-                  Finish(op_handle_, finish_params, message, unused, &finish_out_params, &output));
-        op_handle_ = kOpHandleSentinel;
-
-        out_params->push_back(begin_out_params);
-        out_params->push_back(finish_out_params);
-        return output;
-    }
-
-    string SignMessage(const HidlBuf& key_blob, const string& message,
-                       const AuthorizationSet& params) {
-        SCOPED_TRACE("SignMessage");
-        AuthorizationSet out_params;
-        string signature = ProcessMessage(key_blob, KeyPurpose::SIGN, message, params, &out_params);
-        EXPECT_TRUE(out_params.empty());
-        return signature;
-    }
-
-    string SignMessage(const string& message, const AuthorizationSet& params) {
-        SCOPED_TRACE("SignMessage");
-        return SignMessage(key_blob_, message, params);
-    }
-
-    string MacMessage(const string& message, Digest digest, size_t mac_length) {
-        SCOPED_TRACE("MacMessage");
-        return SignMessage(
-            key_blob_, message,
-            AuthorizationSetBuilder().Digest(digest).Authorization(TAG_MAC_LENGTH, mac_length));
-    }
-
-    void CheckHmacTestVector(const string& key, const string& message, Digest digest,
-                             const string& expected_mac) {
-        SCOPED_TRACE("CheckHmacTestVector");
-        ASSERT_EQ(ErrorCode::OK,
-                  ImportKey(AuthorizationSetBuilder()
-                                .Authorization(TAG_NO_AUTH_REQUIRED)
-                                .HmacKey(key.size() * 8)
-                                .Authorization(TAG_MIN_MAC_LENGTH, expected_mac.size() * 8)
-                                .Digest(digest),
-                            KeyFormat::RAW, key));
-        string signature = MacMessage(message, digest, expected_mac.size() * 8);
-        EXPECT_EQ(expected_mac, signature)
-            << "Test vector didn't match for key of size " << key.size() << " message of size "
-            << message.size() << " and digest " << digest;
-        CheckedDeleteKey();
-    }
-
-    void CheckAesCtrTestVector(const string& key, const string& nonce, const string& message,
-                               const string& expected_ciphertext) {
-        SCOPED_TRACE("CheckAesCtrTestVector");
-        ASSERT_EQ(ErrorCode::OK, ImportKey(AuthorizationSetBuilder()
-                                               .Authorization(TAG_NO_AUTH_REQUIRED)
-                                               .AesEncryptionKey(key.size() * 8)
-                                               .BlockMode(BlockMode::CTR)
-                                               .Authorization(TAG_CALLER_NONCE)
-                                               .Padding(PaddingMode::NONE),
-                                           KeyFormat::RAW, key));
-
-        auto params = AuthorizationSetBuilder()
-                          .Authorization(TAG_NONCE, nonce.data(), nonce.size())
-                          .BlockMode(BlockMode::CTR)
-                          .Padding(PaddingMode::NONE);
-        AuthorizationSet out_params;
-        string ciphertext = EncryptMessage(key_blob_, message, params, &out_params);
-        EXPECT_EQ(expected_ciphertext, ciphertext);
-    }
-
-    void VerifyMessage(const HidlBuf& key_blob, const string& message, const string& signature,
-                       const AuthorizationSet& params) {
-        SCOPED_TRACE("VerifyMessage");
-        AuthorizationSet begin_out_params;
-        ASSERT_EQ(ErrorCode::OK,
-                  Begin(KeyPurpose::VERIFY, key_blob, params, &begin_out_params, &op_handle_));
-
-        string unused;
-        AuthorizationSet finish_params;
-        AuthorizationSet finish_out_params;
-        string output;
-        EXPECT_EQ(ErrorCode::OK, Finish(op_handle_, finish_params, message, signature,
-                                        &finish_out_params, &output));
-        op_handle_ = kOpHandleSentinel;
-        EXPECT_TRUE(output.empty());
-    }
-
-    void VerifyMessage(const string& message, const string& signature,
-                       const AuthorizationSet& params) {
-        SCOPED_TRACE("VerifyMessage");
-        VerifyMessage(key_blob_, message, signature, params);
-    }
-
-    string EncryptMessage(const HidlBuf& key_blob, const string& message,
-                          const AuthorizationSet& in_params, AuthorizationSet* out_params) {
-        SCOPED_TRACE("EncryptMessage");
-        return ProcessMessage(key_blob, KeyPurpose::ENCRYPT, message, in_params, out_params);
-    }
-
-    string EncryptMessage(const string& message, const AuthorizationSet& params,
-                          AuthorizationSet* out_params) {
-        SCOPED_TRACE("EncryptMessage");
-        return EncryptMessage(key_blob_, message, params, out_params);
-    }
-
-    string EncryptMessage(const string& message, const AuthorizationSet& params) {
-        SCOPED_TRACE("EncryptMessage");
-        AuthorizationSet out_params;
-        string ciphertext = EncryptMessage(message, params, &out_params);
-        EXPECT_TRUE(out_params.empty())
-            << "Output params should be empty. Contained: " << out_params;
-        return ciphertext;
-    }
-
-    string DecryptMessage(const HidlBuf& key_blob, const string& ciphertext,
-                          const AuthorizationSet& params) {
-        SCOPED_TRACE("DecryptMessage");
-        AuthorizationSet out_params;
-        string plaintext =
-            ProcessMessage(key_blob, KeyPurpose::DECRYPT, ciphertext, params, &out_params);
-        EXPECT_TRUE(out_params.empty());
-        return plaintext;
-    }
-
-    string DecryptMessage(const string& ciphertext, const AuthorizationSet& params) {
-        SCOPED_TRACE("DecryptMessage");
-        return DecryptMessage(key_blob_, ciphertext, params);
-    }
-
-    std::pair<ErrorCode, HidlBuf> UpgradeKey(const HidlBuf& key_blob) {
-        std::pair<ErrorCode, HidlBuf> retval;
-        keymaster_->upgradeKey(key_blob, hidl_vec<KeyParameter>(),
-                               [&](ErrorCode error, const hidl_vec<uint8_t>& upgraded_blob) {
-                                   retval = std::tie(error, upgraded_blob);
-                               });
-        return retval;
-    }
-
-    static bool IsSecure() { return securityLevel_ != SecurityLevel::SOFTWARE; }
-
-    HidlBuf key_blob_;
-    KeyCharacteristics key_characteristics_;
-    OperationHandle op_handle_ = kOpHandleSentinel;
-
-   private:
-    static sp<IKeymasterDevice> keymaster_;
-    static uint32_t os_version_;
-    static uint32_t os_patch_level_;
-
-    static SecurityLevel securityLevel_;
-    static hidl_string name_;
-    static hidl_string author_;
-};
 
 bool verify_attestation_record(const string& challenge, const string& app_id,
                                AuthorizationSet expected_sw_enforced,
@@ -945,13 +326,6 @@ bool verify_attestation_record(const string& challenge, const string& app_id,
 
     return true;
 }
-
-sp<IKeymasterDevice> KeymasterHidlTest::keymaster_;
-uint32_t KeymasterHidlTest::os_version_;
-uint32_t KeymasterHidlTest::os_patch_level_;
-SecurityLevel KeymasterHidlTest::securityLevel_;
-hidl_string KeymasterHidlTest::name_;
-hidl_string KeymasterHidlTest::author_;
 
 class NewKeyGenerationTest : public KeymasterHidlTest {
    protected:
@@ -1335,6 +709,29 @@ TEST_F(SigningOperationsTest, RsaPaddingNoneDoesNotAllowOther) {
               Begin(KeyPurpose::SIGN, AuthorizationSetBuilder()
                                           .Digest(Digest::NONE)
                                           .Padding(PaddingMode::RSA_PKCS1_1_5_SIGN)));
+}
+
+/*
+ * SigningOperationsTest.NoUserConfirmation
+ *
+ * Verifies that keymaster rejects signing operations for keys with
+ * TRUSTED_CONFIRMATION_REQUIRED and no valid confirmation token
+ * presented.
+ */
+TEST_F(SigningOperationsTest, NoUserConfirmation) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .RsaSigningKey(1024, 3)
+                                             .Digest(Digest::NONE)
+                                             .Padding(PaddingMode::NONE)
+                                             .Authorization(TAG_NO_AUTH_REQUIRED)
+                                             .Authorization(TAG_TRUSTED_CONFIRMATION_REQUIRED)));
+
+    const string message = "12345678901234567890123456789012";
+    EXPECT_EQ(ErrorCode::OK,
+              Begin(KeyPurpose::SIGN,
+                    AuthorizationSetBuilder().Digest(Digest::NONE).Padding(PaddingMode::NONE)));
+    string signature;
+    EXPECT_EQ(ErrorCode::NO_USER_CONFIRMATION, Finish(message, &signature));
 }
 
 /*
@@ -2419,6 +1816,117 @@ TEST_F(ImportKeyTest, HmacKeySuccess) {
     string message = "Hello World!";
     string signature = MacMessage(message, Digest::SHA_2_256, 256);
     VerifyMessage(message, signature, AuthorizationSetBuilder().Digest(Digest::SHA_2_256));
+}
+
+auto wrapped_key = hex2str(
+    "30820173020100048201006F5C273914D9E7EAB667FE62456A57DE64BED4A57DB3EFBB77E6907C82CC36B0BD12CB8A"
+    "85F3F8BC08A26C58186DB5C35636063388A04AE5579D3BDC057F9BB0EB6FDDA5E836DBB1F18A4546A64BA06E3D0132"
+    "AAA3306676638C786FAF0722E6E4145E0C91B009C422691F9F42F9F179DA93E16E7793DE5960E77A387433F0B43E49"
+    "3A7CF77ECA25BA724CC02F916D5792CAA76BC0756D3DB5D110D209B8B30285E9653D91FD89E953F351D82ACE1422CC"
+    "A146F8BD0C2F4CC32D1F81D894F4650043DB46109869696319A1A011BB003F2EBD8FA20B4A43F3226C1F182A39AE81"
+    "A35B9B7590A48B6A6874C9CC0EE0CD9528FB908688B4111932DF478CD7A92B50040CD796B02C370F1FA4CC0124F130"
+    "280201033023A1083106020100020101A203020120A30402020100A4053103020101A60531030201400420CCD54085"
+    "5F833A5E1480BFD2D36FAF3AEEE15DF5BEABE2691BC82DDE2A7AA91004107CB81BDDCD09E8F4DF575726279F3229");
+
+auto wrapped_key_masked = hex2str(
+    "30820173020100048201009059BB6E48F8036ABE1800D9C74F3DB5F20448F035C2C78AFBCC28AF26581061298CAC78"
+    "A8CA5B79721B60B74490555168488ED696C8930D00463C6FC81BF0B6E4E26C93E018D0E3DC8754C6B261E0A7C3A6DA"
+    "1A223EB59ACA8E13348F14B9E944AF3C224906C1ABFE21ADDEE81FC641D45E092C6B0A75A9BA56C05529AE47ECA0D5"
+    "CD3568501CF04D47391FC695EDE19A3022B347D1BDC6C792A08AA014F87DD4BBD44777B14D7D2273191DDCFE4E8512"
+    "EFA677A14E68E5D820C5513331D687C08B6317FA64D404231D05C74CDD9AEB89D253FBE07154B2080CF4ACA5E1EFCB"
+    "53EB193E8A01DD5F9634B65EF9B49899003E245FDA6A3B137FAC1263E55A6E1D040C6D9721D08589581AB49204A330"
+    "280201033023A1083106020100020101A203020120A30402020100A4053103020101A60531030201400420A61C6E24"
+    "7E25B3E6E69AA78EB03C2D4AC20D1F99A9A024A76F35C8E2CAB9B68D04101FF7A0E793B9EE4AECEBB9AC4C545254");
+
+auto wrapping_key = hex2str(
+    "308204be020100300d06092a864886f70d0101010500048204a8308204a40201000282010100aec367931d8900ce56"
+    "b0067f7d70e1fc653f3f34d194c1fed50018fb43db937b06e673a837313d56b1c725150a3fef86acbddc41bb759c28"
+    "54eae32d35841efb5c18d82bc90a1cb5c1d55adf245b02911f0b7cda88c421ff0ebafe7c0d23be312d7bd5921ffaea"
+    "1347c157406fef718f682643e4e5d33c6703d61c0cf7ac0bf4645c11f5c1374c3886427411c449796792e0bef75dec"
+    "858a2123c36753e02a95a96d7c454b504de385a642e0dfc3e60ac3a7ee4991d0d48b0172a95f9536f02ba13cecccb9"
+    "2b727db5c27e5b2f5cec09600b286af5cf14c42024c61ddfe71c2a8d7458f185234cb00e01d282f10f8fc6721d2aed"
+    "3f4833cca2bd8fa62821dd55020301000102820100431447b6251908112b1ee76f99f3711a52b6630960046c2de70d"
+    "e188d833f8b8b91e4d785caeeeaf4f0f74414e2cda40641f7fe24f14c67a88959bdb27766df9e710b630a03adc683b"
+    "5d2c43080e52bee71e9eaeb6de297a5fea1072070d181c822bccff087d63c940ba8a45f670feb29fb4484d1c95e6d2"
+    "579ba02aae0a00900c3ebf490e3d2cd7ee8d0e20c536e4dc5a5097272888cddd7e91f228b1c4d7474c55b8fcd618c4"
+    "a957bbddd5ad7407cc312d8d98a5caf7e08f4a0d6b45bb41c652659d5a5ba05b663737a8696281865ba20fbdd7f851"
+    "e6c56e8cbe0ddbbf24dc03b2d2cb4c3d540fb0af52e034a2d06698b128e5f101e3b51a34f8d8b4f8618102818100de"
+    "392e18d682c829266cc3454e1d6166242f32d9a1d10577753e904ea7d08bff841be5bac82a164c5970007047b8c517"
+    "db8f8f84e37bd5988561bdf503d4dc2bdb38f885434ae42c355f725c9a60f91f0788e1f1a97223b524b5357fdf72e2"
+    "f696bab7d78e32bf92ba8e1864eab1229e91346130748a6e3c124f9149d71c743502818100c95387c0f9d35f137b57"
+    "d0d65c397c5e21cc251e47008ed62a542409c8b6b6ac7f8967b3863ca645fcce49582a9aa17349db6c4a95affdae0d"
+    "ae612e1afac99ed39a2d934c880440aed8832f9843163a47f27f392199dc1202f9a0f9bd08308007cb1e4e7f583093"
+    "66a7de25f7c3c9b880677c068e1be936e81288815252a8a102818057ff8ca1895080b2cae486ef0adfd791fb0235c0"
+    "b8b36cd6c136e52e4085f4ea5a063212a4f105a3764743e53281988aba073f6e0027298e1c4378556e0efca0e14ece"
+    "1af76ad0b030f27af6f0ab35fb73a060d8b1a0e142fa2647e93b32e36d8282ae0a4de50ab7afe85500a16f43a64719"
+    "d6e2b9439823719cd08bcd03178102818100ba73b0bb28e3f81e9bd1c568713b101241acc607976c4ddccc90e65b65"
+    "56ca31516058f92b6e09f3b160ff0e374ec40d78ae4d4979fde6ac06a1a400c61dd31254186af30b22c10582a8a43e"
+    "34fe949c5f3b9755bae7baa7b7b7a6bd03b38cef55c86885fc6c1978b9cee7ef33da507c9df6b9277cff1e6aaa5d57"
+    "aca528466102818100c931617c77829dfb1270502be9195c8f2830885f57dba869536811e6864236d0c4736a0008a1"
+    "45af36b8357a7c3d139966d04c4e00934ea1aede3bb6b8ec841dc95e3f579751e2bfdfe27ae778983f959356210723"
+    "287b0affcc9f727044d48c373f1babde0724fa17a4fd4da0902c7c9b9bf27ba61be6ad02dfddda8f4e6822");
+
+string zero_masking_key =
+    hex2str("0000000000000000000000000000000000000000000000000000000000000000");
+string masking_key = hex2str("D796B02C370F1FA4CC0124F14EC8CBEBE987E825246265050F399A51FD477DFC");
+
+class ImportWrappedKeyTest : public KeymasterHidlTest {};
+
+TEST_F(ImportWrappedKeyTest, Success) {
+    auto wrapping_key_desc = AuthorizationSetBuilder()
+                                 .RsaEncryptionKey(2048, 65537)
+                                 .Digest(Digest::SHA1)
+                                 .Padding(PaddingMode::RSA_OAEP)
+                                 .Authorization(TAG_PURPOSE, KeyPurpose::WRAP_KEY);
+
+    ASSERT_EQ(ErrorCode::OK,
+              ImportWrappedKey(
+                  wrapped_key, wrapping_key, wrapping_key_desc, zero_masking_key,
+                  AuthorizationSetBuilder().Digest(Digest::SHA1).Padding(PaddingMode::RSA_OAEP)));
+
+    string message = "Hello World!";
+    auto params = AuthorizationSetBuilder().BlockMode(BlockMode::ECB).Padding(PaddingMode::PKCS7);
+    string ciphertext = EncryptMessage(message, params);
+    string plaintext = DecryptMessage(ciphertext, params);
+    EXPECT_EQ(message, plaintext);
+}
+
+TEST_F(ImportWrappedKeyTest, SuccessMasked) {
+    auto wrapping_key_desc = AuthorizationSetBuilder()
+                                 .RsaEncryptionKey(2048, 65537)
+                                 .Digest(Digest::SHA1)
+                                 .Padding(PaddingMode::RSA_OAEP)
+                                 .Authorization(TAG_PURPOSE, KeyPurpose::WRAP_KEY);
+
+    ASSERT_EQ(ErrorCode::OK,
+              ImportWrappedKey(
+                  wrapped_key_masked, wrapping_key, wrapping_key_desc, masking_key,
+                  AuthorizationSetBuilder().Digest(Digest::SHA1).Padding(PaddingMode::RSA_OAEP)));
+}
+
+TEST_F(ImportWrappedKeyTest, WrongMask) {
+    auto wrapping_key_desc = AuthorizationSetBuilder()
+                                 .RsaEncryptionKey(2048, 65537)
+                                 .Digest(Digest::SHA1)
+                                 .Padding(PaddingMode::RSA_OAEP)
+                                 .Authorization(TAG_PURPOSE, KeyPurpose::WRAP_KEY);
+
+    ASSERT_EQ(ErrorCode::VERIFICATION_FAILED,
+              ImportWrappedKey(
+                  wrapped_key_masked, wrapping_key, wrapping_key_desc, zero_masking_key,
+                  AuthorizationSetBuilder().Digest(Digest::SHA1).Padding(PaddingMode::RSA_OAEP)));
+}
+
+TEST_F(ImportWrappedKeyTest, WrongPurpose) {
+    auto wrapping_key_desc = AuthorizationSetBuilder()
+                                 .RsaEncryptionKey(2048, 65537)
+                                 .Digest(Digest::SHA1)
+                                 .Padding(PaddingMode::RSA_OAEP);
+
+    ASSERT_EQ(ErrorCode::INCOMPATIBLE_PURPOSE,
+              ImportWrappedKey(
+                  wrapped_key_masked, wrapping_key, wrapping_key_desc, zero_masking_key,
+                  AuthorizationSetBuilder().Digest(Digest::SHA1).Padding(PaddingMode::RSA_OAEP)));
 }
 
 typedef KeymasterHidlTest EncryptionOperationsTest;
@@ -3710,6 +3218,535 @@ TEST_F(EncryptionOperationsTest, AesGcmCorruptTag) {
               Finish(op_handle_, finish_params, ciphertext, "" /* signature */, &finish_out_params,
                      &plaintext));
     EXPECT_TRUE(finish_out_params.empty());
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesEcbRoundTripSuccess
+ *
+ * Verifies that 3DES is basically functional.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesEcbRoundTripSuccess) {
+    std::cout << "Hello" << std::endl;
+
+    auto auths = AuthorizationSetBuilder()
+                     .TripleDesEncryptionKey(112)
+                     .BlockMode(BlockMode::ECB)
+                     .Padding(PaddingMode::NONE);
+
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(auths));
+    // Two-block message.
+    string message = "1234567890123456";
+    auto inParams = AuthorizationSetBuilder().BlockMode(BlockMode::ECB).Padding(PaddingMode::NONE);
+    string ciphertext1 = EncryptMessage(message, inParams);
+    EXPECT_EQ(message.size(), ciphertext1.size());
+
+    string ciphertext2 = EncryptMessage(string(message), inParams);
+    EXPECT_EQ(message.size(), ciphertext2.size());
+
+    // ECB is deterministic.
+    EXPECT_EQ(ciphertext1, ciphertext2);
+
+    string plaintext = DecryptMessage(ciphertext1, inParams);
+    EXPECT_EQ(message, plaintext);
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesEcbNotAuthorized
+ *
+ * Verifies that CBC keys reject ECB usage.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesEcbNotAuthorized) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::CBC)
+                                             .Padding(PaddingMode::NONE)));
+
+    auto inParams = AuthorizationSetBuilder().BlockMode(BlockMode::ECB).Padding(PaddingMode::NONE);
+    EXPECT_EQ(ErrorCode::INCOMPATIBLE_BLOCK_MODE, Begin(KeyPurpose::ENCRYPT, inParams));
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesEcbPkcs7Padding
+ *
+ * Tests ECB mode with PKCS#7 padding, various message sizes.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesEcbPkcs7Padding) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::ECB)
+                                             .Padding(PaddingMode::PKCS7)));
+
+    for (size_t i = 0; i < 32; ++i) {
+        string message(i, 'a');
+        auto inParams =
+            AuthorizationSetBuilder().BlockMode(BlockMode::ECB).Padding(PaddingMode::PKCS7);
+        string ciphertext = EncryptMessage(message, inParams);
+        EXPECT_EQ(i + 8 - (i % 8), ciphertext.size());
+        string plaintext = DecryptMessage(ciphertext, inParams);
+        EXPECT_EQ(message, plaintext);
+    }
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesEcbNoPaddingKeyWithPkcs7Padding
+ *
+ * Verifies that keys configured for no padding reject PKCS7 padding
+ */
+TEST_F(EncryptionOperationsTest, TripleDesEcbNoPaddingKeyWithPkcs7Padding) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::ECB)
+                                             .Padding(PaddingMode::NONE)));
+    for (size_t i = 0; i < 32; ++i) {
+        auto inParams =
+            AuthorizationSetBuilder().BlockMode(BlockMode::ECB).Padding(PaddingMode::PKCS7);
+        EXPECT_EQ(ErrorCode::INCOMPATIBLE_PADDING_MODE, Begin(KeyPurpose::ENCRYPT, inParams));
+    }
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesEcbPkcs7PaddingCorrupted
+ *
+ * Verifies that corrupted padding is detected.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesEcbPkcs7PaddingCorrupted) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::ECB)
+                                             .Padding(PaddingMode::PKCS7)));
+
+    string message = "a";
+    string ciphertext = EncryptMessage(message, BlockMode::ECB, PaddingMode::PKCS7);
+    EXPECT_EQ(8U, ciphertext.size());
+    EXPECT_NE(ciphertext, message);
+    ++ciphertext[ciphertext.size() / 2];
+
+    AuthorizationSetBuilder begin_params;
+    begin_params.push_back(TAG_BLOCK_MODE, BlockMode::ECB);
+    begin_params.push_back(TAG_PADDING, PaddingMode::PKCS7);
+    EXPECT_EQ(ErrorCode::OK, Begin(KeyPurpose::DECRYPT, begin_params));
+    string plaintext;
+    size_t input_consumed;
+    EXPECT_EQ(ErrorCode::OK, Update(ciphertext, &plaintext, &input_consumed));
+    EXPECT_EQ(ciphertext.size(), input_consumed);
+    EXPECT_EQ(ErrorCode::INVALID_ARGUMENT, Finish(&plaintext));
+}
+
+struct TripleDesTestVector {
+    const char* name;
+    const KeyPurpose purpose;
+    const BlockMode block_mode;
+    const PaddingMode padding_mode;
+    const char* key;
+    const char* iv;
+    const char* input;
+    const char* output;
+};
+
+// These test vectors are from NIST CAVP, plus a few custom variants to test padding, since all of
+// the NIST vectors are multiples of the block size.
+static const TripleDesTestVector kTripleDesTestVectors[] = {
+    {
+        "TECBMMT2 Encrypt 0", KeyPurpose::ENCRYPT, BlockMode::ECB, PaddingMode::NONE,
+        "ad192fd064b5579e7a4fb3c8f794f22a",  // key
+        "",                                  // IV
+        "13bad542f3652d67",                  // input
+        "908e543cf2cb254f",                  // output
+    },
+    {
+        "TECBMMT2 Encrypt 0 PKCS7", KeyPurpose::ENCRYPT, BlockMode::ECB, PaddingMode::PKCS7,
+        "ad192fd064b5579e7a4fb3c8f794f22a",  // key
+        "",                                  // IV
+        "13bad542f3652d6700",                // input
+        "908e543cf2cb254fc40165289a89008c",  // output
+    },
+    {
+        "TECBMMT2 Encrypt 0 PKCS7 decrypted", KeyPurpose::DECRYPT, BlockMode::ECB,
+        PaddingMode::PKCS7,
+        "ad192fd064b5579e7a4fb3c8f794f22a",  // key
+        "",                                  // IV
+        "908e543cf2cb254fc40165289a89008c",  // input
+        "13bad542f3652d6700",                // output
+    },
+    {
+        "TECBMMT2 Encrypt 1", KeyPurpose::ENCRYPT, BlockMode::ECB, PaddingMode::NONE,
+        "259df16e7af804fe83b90e9bf7c7e557",  // key
+        "",                                  // IV
+        "a4619c433bbd6787c07c81728f9ac9fa",  // input
+        "9e06de155c483c6bcfd834dbc8bd5830",  // output
+    },
+    {
+        "TECBMMT2 Decrypt 0", KeyPurpose::DECRYPT, BlockMode::ECB, PaddingMode::NONE,
+        "b32ff42092024adf2076b9d3d9f19e6d",  // key
+        "",                                  // IV
+        "2f3f2a49bba807a5",                  // input
+        "2249973fa135fb52",                  // output
+    },
+    {
+        "TECBMMT2 Decrypt 1", KeyPurpose::DECRYPT, BlockMode::ECB, PaddingMode::NONE,
+        "023dfbe6621aa17cc219eae9cdecd923",  // key
+        "",                                  // IV
+        "54045dc71d8d565b227ec19f06fef912",  // input
+        "9b071622181e6412de6066429401410d",  // output
+    },
+    {
+        "TECBMMT3 Encrypt 0", KeyPurpose::ENCRYPT, BlockMode::ECB, PaddingMode::NONE,
+        "a2b5bc67da13dc92cd9d344aa238544a0e1fa79ef76810cd",  // key
+        "",                                                  // IV
+        "329d86bdf1bc5af4",                                  // input
+        "d946c2756d78633f",                                  // output
+    },
+    {
+        "TECBMMT3 Encrypt 1", KeyPurpose::ENCRYPT, BlockMode::ECB, PaddingMode::NONE,
+        "49e692290d2a5e46bace79b9648a4c5d491004c262dc9d49",  // key
+        "",                                                  // IV
+        "6b1540781b01ce1997adae102dbf3c5b",                  // input
+        "4d0dc182d6e481ac4a3dc6ab6976ccae",                  // output
+    },
+    {
+        "TECBMMT3 Decrypt 0", KeyPurpose::DECRYPT, BlockMode::ECB, PaddingMode::NONE,
+        "52daec2ac7dc1958377392682f37860b2cc1ea2304bab0e9",  // key
+        "",                                                  // IV
+        "6daad94ce08acfe7",                                  // input
+        "660e7d32dcc90e79",                                  // output
+    },
+    {
+        "TECBMMT3 Decrypt 1", KeyPurpose::DECRYPT, BlockMode::ECB, PaddingMode::NONE,
+        "7f8fe3d3f4a48394fb682c2919926d6ddfce8932529229ce",  // key
+        "",                                                  // IV
+        "e9653a0a1f05d31b9acd12d73aa9879d",                  // input
+        "9b2ae9d998efe62f1b592e7e1df8ff38",                  // output
+    },
+    {
+        "TCBCMMT2 Encrypt 0", KeyPurpose::ENCRYPT, BlockMode::CBC, PaddingMode::NONE,
+        "34a41a8c293176c1b30732ecfe38ae8a",  // key
+        "f55b4855228bd0b4",                  // IV
+        "7dd880d2a9ab411c",                  // input
+        "c91892948b6cadb4",                  // output
+    },
+    {
+        "TCBCMMT2 Encrypt 1", KeyPurpose::ENCRYPT, BlockMode::CBC, PaddingMode::NONE,
+        "70a88fa1dfb9942fa77f40157ffef2ad",  // key
+        "ece08ce2fdc6ce80",                  // IV
+        "bc225304d5a3a5c9918fc5006cbc40cc",  // input
+        "27f67dc87af7ddb4b68f63fa7c2d454a",  // output
+    },
+    {
+        "TCBCMMT2 Decrypt 0", KeyPurpose::DECRYPT, BlockMode::CBC, PaddingMode::NONE,
+        "4ff47fda89209bda8c85f7fe80192007",  // key
+        "d5bc4891dabe48b9",                  // IV
+        "7e154b28c353adef",                  // input
+        "712b961ea9a1d0af",                  // output
+    },
+    {
+        "TCBCMMT2 Decrypt 1", KeyPurpose::DECRYPT, BlockMode::CBC, PaddingMode::NONE,
+        "464092cdbf736d38fb1fe6a12a94ae0e",  // key
+        "5423455f00023b01",                  // IV
+        "3f6050b74ed64416bc23d53b0469ed7a",  // input
+        "9cbe7d1b5cdd1864c3095ba810575960",  // output
+    },
+    {
+        "TCBCMMT3 Encrypt 0", KeyPurpose::ENCRYPT, BlockMode::CBC, PaddingMode::NONE,
+        "b5cb1504802326c73df186e3e352a20de643b0d63ee30e37",  // key
+        "43f791134c5647ba",                                  // IV
+        "dcc153cef81d6f24",                                  // input
+        "92538bd8af18d3ba",                                  // output
+    },
+    {
+        "TCBCMMT3 Encrypt 1", KeyPurpose::ENCRYPT, BlockMode::CBC, PaddingMode::NONE,
+        "a49d7564199e97cb529d2c9d97bf2f98d35edf57ba1f7358",  // key
+        "c2e999cb6249023c",                                  // IV
+        "c689aee38a301bb316da75db36f110b5",                  // input
+        "e9afaba5ec75ea1bbe65506655bb4ecb",                  // output
+    },
+    {
+        "TCBCMMT3 Encrypt 1 PKCS7 variant", KeyPurpose::ENCRYPT, BlockMode::CBC, PaddingMode::PKCS7,
+        "a49d7564199e97cb529d2c9d97bf2f98d35edf57ba1f7358",  // key
+        "c2e999cb6249023c",                                  // IV
+        "c689aee38a301bb316da75db36f110b500",                // input
+        "e9afaba5ec75ea1bbe65506655bb4ecb825aa27ec0656156",  // output
+    },
+    {
+        "TCBCMMT3 Encrypt 1 PKCS7 decrypted", KeyPurpose::DECRYPT, BlockMode::CBC,
+        PaddingMode::PKCS7,
+        "a49d7564199e97cb529d2c9d97bf2f98d35edf57ba1f7358",  // key
+        "c2e999cb6249023c",                                  // IV
+        "e9afaba5ec75ea1bbe65506655bb4ecb825aa27ec0656156",  // input
+        "c689aee38a301bb316da75db36f110b500",                // output
+    },
+    {
+        "TCBCMMT3 Decrypt 0", KeyPurpose::DECRYPT, BlockMode::CBC, PaddingMode::NONE,
+        "5eb6040d46082c7aa7d06dfd08dfeac8c18364c1548c3ba1",  // key
+        "41746c7e442d3681",                                  // IV
+        "c53a7b0ec40600fe",                                  // input
+        "d4f00eb455de1034",                                  // output
+    },
+    {
+        "TCBCMMT3 Decrypt 1", KeyPurpose::DECRYPT, BlockMode::CBC, PaddingMode::NONE,
+        "5b1cce7c0dc1ec49130dfb4af45785ab9179e567f2c7d549",  // key
+        "3982bc02c3727d45",                                  // IV
+        "6006f10adef52991fcc777a1238bbb65",                  // input
+        "edae09288e9e3bc05746d872b48e3b29",                  // output
+    },
+};
+
+/*
+ * EncryptionOperationsTest.TripleDesTestVector
+ *
+ * Verifies that NIST (plus a few extra) test vectors produce the correct results.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesTestVector) {
+    constexpr size_t num_tests = sizeof(kTripleDesTestVectors) / sizeof(TripleDesTestVector);
+    for (auto* test = kTripleDesTestVectors; test < kTripleDesTestVectors + num_tests; ++test) {
+        SCOPED_TRACE(test->name);
+        CheckTripleDesTestVector(test->purpose, test->block_mode, test->padding_mode,
+                                 hex2str(test->key), hex2str(test->iv), hex2str(test->input),
+                                 hex2str(test->output));
+    }
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesCbcRoundTripSuccess
+ *
+ * Validates CBC mode functionality.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesCbcRoundTripSuccess) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::CBC)
+                                             .Padding(PaddingMode::NONE)));
+    // Two-block message.
+    string message = "1234567890123456";
+    HidlBuf iv1;
+    string ciphertext1 = EncryptMessage(message, BlockMode::CBC, PaddingMode::NONE, &iv1);
+    EXPECT_EQ(message.size(), ciphertext1.size());
+
+    HidlBuf iv2;
+    string ciphertext2 = EncryptMessage(message, BlockMode::CBC, PaddingMode::NONE, &iv2);
+    EXPECT_EQ(message.size(), ciphertext2.size());
+
+    // IVs should be random, so ciphertexts should differ.
+    EXPECT_NE(iv1, iv2);
+    EXPECT_NE(ciphertext1, ciphertext2);
+
+    string plaintext = DecryptMessage(ciphertext1, BlockMode::CBC, PaddingMode::NONE, iv1);
+    EXPECT_EQ(message, plaintext);
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesCallerIv
+ *
+ * Validates that 3DES keys can allow caller-specified IVs, and use them correctly.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesCallerIv) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::CBC)
+                                             .Authorization(TAG_CALLER_NONCE)
+                                             .Padding(PaddingMode::NONE)));
+    string message = "1234567890123456";
+    HidlBuf iv;
+    // Don't specify IV, should get a random one.
+    string ciphertext1 = EncryptMessage(message, BlockMode::CBC, PaddingMode::NONE, &iv);
+    EXPECT_EQ(message.size(), ciphertext1.size());
+    EXPECT_EQ(8U, iv.size());
+
+    string plaintext = DecryptMessage(ciphertext1, BlockMode::CBC, PaddingMode::NONE, iv);
+    EXPECT_EQ(message, plaintext);
+
+    // Now specify an IV, should also work.
+    iv = HidlBuf("abcdefgh");
+    string ciphertext2 = EncryptMessage(message, BlockMode::CBC, PaddingMode::NONE, iv);
+
+    // Decrypt with correct IV.
+    plaintext = DecryptMessage(ciphertext2, BlockMode::CBC, PaddingMode::NONE, iv);
+    EXPECT_EQ(message, plaintext);
+
+    // Now try with wrong IV.
+    plaintext = DecryptMessage(ciphertext2, BlockMode::CBC, PaddingMode::NONE, HidlBuf("aaaaaaaa"));
+    EXPECT_NE(message, plaintext);
+}
+
+/*
+ * EncryptionOperationsTest, TripleDesCallerNonceProhibited.
+ *
+ * Verifies that 3DES keys without TAG_CALLER_NONCE do not allow caller-specified IVS.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesCallerNonceProhibited) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::CBC)
+                                             .Padding(PaddingMode::NONE)));
+
+    string message = "12345678901234567890123456789012";
+    HidlBuf iv;
+    // Don't specify nonce, should get a random one.
+    string ciphertext1 = EncryptMessage(message, BlockMode::CBC, PaddingMode::NONE, &iv);
+    EXPECT_EQ(message.size(), ciphertext1.size());
+    EXPECT_EQ(8U, iv.size());
+
+    string plaintext = DecryptMessage(ciphertext1, BlockMode::CBC, PaddingMode::NONE, iv);
+    EXPECT_EQ(message, plaintext);
+
+    // Now specify a nonce, should fail.
+    auto input_params = AuthorizationSetBuilder()
+                            .Authorization(TAG_NONCE, HidlBuf("abcdefgh"))
+                            .BlockMode(BlockMode::CBC)
+                            .Padding(PaddingMode::NONE);
+    AuthorizationSet output_params;
+    EXPECT_EQ(ErrorCode::CALLER_NONCE_PROHIBITED,
+              Begin(KeyPurpose::ENCRYPT, input_params, &output_params));
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesCbcNotAuthorized
+ *
+ * Verifies that 3DES ECB-only keys do not allow CBC usage.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesCbcNotAuthorized) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::ECB)
+                                             .Padding(PaddingMode::NONE)));
+    // Two-block message.
+    string message = "1234567890123456";
+    auto begin_params =
+        AuthorizationSetBuilder().BlockMode(BlockMode::CBC).Padding(PaddingMode::NONE);
+    EXPECT_EQ(ErrorCode::INCOMPATIBLE_BLOCK_MODE, Begin(KeyPurpose::ENCRYPT, begin_params));
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesCbcNoPaddingWrongInputSize
+ *
+ * Verifies that unpadded CBC operations reject inputs that are not a multiple of block size.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesCbcNoPaddingWrongInputSize) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::CBC)
+                                             .Padding(PaddingMode::NONE)));
+    // Message is slightly shorter than two blocks.
+    string message = "123456789012345";
+
+    auto begin_params =
+        AuthorizationSetBuilder().BlockMode(BlockMode::CBC).Padding(PaddingMode::NONE);
+    AuthorizationSet output_params;
+    EXPECT_EQ(ErrorCode::OK, Begin(KeyPurpose::ENCRYPT, begin_params, &output_params));
+    string ciphertext;
+    EXPECT_EQ(ErrorCode::INVALID_INPUT_LENGTH, Finish(message, "", &ciphertext));
+}
+
+/*
+ * EncryptionOperationsTest, TripleDesCbcPkcs7Padding.
+ *
+ * Verifies that PKCS7 padding works correctly in CBC mode.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesCbcPkcs7Padding) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::CBC)
+                                             .Padding(PaddingMode::PKCS7)));
+
+    // Try various message lengths; all should work.
+    for (size_t i = 0; i < 32; ++i) {
+        string message(i, 'a');
+        HidlBuf iv;
+        string ciphertext = EncryptMessage(message, BlockMode::CBC, PaddingMode::PKCS7, &iv);
+        EXPECT_EQ(i + 8 - (i % 8), ciphertext.size());
+        string plaintext = DecryptMessage(ciphertext, BlockMode::CBC, PaddingMode::PKCS7, iv);
+        EXPECT_EQ(message, plaintext);
+    }
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesCbcNoPaddingKeyWithPkcs7Padding
+ *
+ * Verifies that a key that requires PKCS7 padding cannot be used in unpadded mode.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesCbcNoPaddingKeyWithPkcs7Padding) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::CBC)
+                                             .Padding(PaddingMode::NONE)));
+
+    // Try various message lengths; all should fail.
+    for (size_t i = 0; i < 32; ++i) {
+        auto begin_params =
+            AuthorizationSetBuilder().BlockMode(BlockMode::CBC).Padding(PaddingMode::PKCS7);
+        EXPECT_EQ(ErrorCode::INCOMPATIBLE_PADDING_MODE, Begin(KeyPurpose::ENCRYPT, begin_params));
+    }
+}
+
+/*
+ * EncryptionOperationsTest.TripleDesCbcPkcs7PaddingCorrupted
+ *
+ * Verifies that corrupted PKCS7 padding is rejected during decryption.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesCbcPkcs7PaddingCorrupted) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::CBC)
+                                             .Padding(PaddingMode::PKCS7)));
+
+    string message = "a";
+    HidlBuf iv;
+    string ciphertext = EncryptMessage(message, BlockMode::CBC, PaddingMode::PKCS7, &iv);
+    EXPECT_EQ(8U, ciphertext.size());
+    EXPECT_NE(ciphertext, message);
+    ++ciphertext[ciphertext.size() / 2];
+
+    auto begin_params = AuthorizationSetBuilder()
+                            .BlockMode(BlockMode::CBC)
+                            .Padding(PaddingMode::PKCS7)
+                            .Authorization(TAG_NONCE, iv);
+    EXPECT_EQ(ErrorCode::OK, Begin(KeyPurpose::DECRYPT, begin_params));
+    string plaintext;
+    size_t input_consumed;
+    EXPECT_EQ(ErrorCode::OK, Update(ciphertext, &plaintext, &input_consumed));
+    EXPECT_EQ(ciphertext.size(), input_consumed);
+    EXPECT_EQ(ErrorCode::INVALID_ARGUMENT, Finish(&plaintext));
+}
+
+/*
+ * EncryptionOperationsTest, TripleDesCbcIncrementalNoPadding.
+ *
+ * Verifies that 3DES CBC works with many different input sizes.
+ */
+TEST_F(EncryptionOperationsTest, TripleDesCbcIncrementalNoPadding) {
+    ASSERT_EQ(ErrorCode::OK, GenerateKey(AuthorizationSetBuilder()
+                                             .TripleDesEncryptionKey(112)
+                                             .BlockMode(BlockMode::CBC)
+                                             .Padding(PaddingMode::NONE)));
+
+    int increment = 7;
+    string message(240, 'a');
+    AuthorizationSet input_params =
+        AuthorizationSetBuilder().BlockMode(BlockMode::CBC).Padding(PaddingMode::NONE);
+    AuthorizationSet output_params;
+    EXPECT_EQ(ErrorCode::OK, Begin(KeyPurpose::ENCRYPT, input_params, &output_params));
+
+    string ciphertext;
+    size_t input_consumed;
+    for (size_t i = 0; i < message.size(); i += increment)
+        EXPECT_EQ(ErrorCode::OK,
+                  Update(message.substr(i, increment), &ciphertext, &input_consumed));
+    EXPECT_EQ(ErrorCode::OK, Finish(&ciphertext));
+    EXPECT_EQ(message.size(), ciphertext.size());
+
+    // Move TAG_NONCE into input_params
+    input_params = output_params;
+    input_params.push_back(TAG_BLOCK_MODE, BlockMode::CBC);
+    input_params.push_back(TAG_PADDING, PaddingMode::NONE);
+    output_params.Clear();
+
+    EXPECT_EQ(ErrorCode::OK, Begin(KeyPurpose::DECRYPT, input_params, &output_params));
+    string plaintext;
+    for (size_t i = 0; i < ciphertext.size(); i += increment)
+        EXPECT_EQ(ErrorCode::OK,
+                  Update(ciphertext.substr(i, increment), &plaintext, &input_consumed));
+    EXPECT_EQ(ErrorCode::OK, Finish(&plaintext));
+    EXPECT_EQ(ciphertext.size(), plaintext.size());
+    EXPECT_EQ(message, plaintext);
 }
 
 typedef KeymasterHidlTest MaxOperationsTest;

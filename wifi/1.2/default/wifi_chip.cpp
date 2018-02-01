@@ -14,8 +14,13 @@
  * limitations under the License.
  */
 
+#include <fcntl.h>
+
 #include <android-base/logging.h>
+#include <android-base/unique_fd.h>
 #include <cutils/properties.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 
 #include "hidl_return_util.h"
 #include "hidl_struct_util.h"
@@ -23,6 +28,7 @@
 #include "wifi_status_util.h"
 
 namespace {
+using android::base::unique_fd;
 using android::hardware::hidl_string;
 using android::hardware::hidl_vec;
 using android::hardware::wifi::V1_0::ChipModeId;
@@ -38,6 +44,11 @@ constexpr ChipModeId kV1StaChipModeId = 0;
 constexpr ChipModeId kV1ApChipModeId = 1;
 // Mode ID for V2
 constexpr ChipModeId kV2ChipModeId = 2;
+
+constexpr char kCpioMagic[] = "070701";
+constexpr size_t kMaxBufferSizeBytes = 1024 * 1024;
+constexpr uint32_t kMaxRingBufferFileAgeSeconds = 60 * 60;
+constexpr char kTombstoneFolderPath[] = "/data/vendor/tombstones/wifi/";
 
 template <typename Iface>
 void invalidateAndClear(std::vector<sp<Iface>>& ifaces, sp<Iface> iface) {
@@ -93,6 +104,165 @@ std::string getP2pIfaceName() {
     return buffer.data();
 }
 
+// delete files older than a predefined time in the wifi tombstone dir
+bool removeOldFilesInternal() {
+    time_t now = time(0);
+    const time_t delete_files_before = now - kMaxRingBufferFileAgeSeconds;
+    DIR* dir_dump = opendir(kTombstoneFolderPath);
+    if (!dir_dump) {
+        LOG(ERROR) << "Failed to open directory: " << strerror(errno);
+        return false;
+    }
+    unique_fd dir_auto_closer(dirfd(dir_dump));
+    struct dirent* dp;
+    bool success = true;
+    while ((dp = readdir(dir_dump))) {
+        if (dp->d_type != DT_REG) {
+            continue;
+        }
+        std::string cur_file_name(dp->d_name);
+        struct stat cur_file_stat;
+        std::string cur_file_path = kTombstoneFolderPath + cur_file_name;
+        if (stat(cur_file_path.c_str(), &cur_file_stat) != -1) {
+            if (cur_file_stat.st_mtime < delete_files_before) {
+                if (unlink(cur_file_path.c_str()) != 0) {
+                    LOG(ERROR) << "Error deleting file " << strerror(errno);
+                    success = false;
+                }
+            }
+        } else {
+            LOG(ERROR) << "Failed to get file stat for " << cur_file_path
+                       << ": " << strerror(errno);
+            success = false;
+        }
+    }
+    return success;
+}
+
+// Archives all files in |input_dir| and writes result into |out_fd|
+// Logic obtained from //external/toybox/toys/posix/cpio.c "Output cpio archive"
+// portion
+size_t cpioFilesInDir(int out_fd, const char* input_dir) {
+    struct dirent* dp;
+    size_t n_error = 0;
+    char read_buf[32 * 1024];
+    DIR* dir_dump = opendir(input_dir);
+    if (!dir_dump) {
+        LOG(ERROR) << "Failed to open directory: " << strerror(errno);
+        n_error++;
+        return n_error;
+    }
+    unique_fd dir_auto_closer(dirfd(dir_dump));
+    while ((dp = readdir(dir_dump))) {
+        if (dp->d_type != DT_REG) {
+            continue;
+        }
+        std::string cur_file_name(dp->d_name);
+        const size_t file_name_len =
+            cur_file_name.size() + 1;  // string.size() does not include the
+                                       // null terminator. The cpio FreeBSD file
+                                       // header expects the null character to
+                                       // be included in the length.
+        struct stat st;
+        ssize_t llen;
+        const std::string cur_file_path = kTombstoneFolderPath + cur_file_name;
+        if (stat(cur_file_path.c_str(), &st) != -1) {
+            const int fd_read = open(cur_file_path.c_str(), O_RDONLY);
+            unique_fd file_auto_closer(fd_read);
+            if (fd_read == -1) {
+                LOG(ERROR) << "Failed to read file " << cur_file_path << " "
+                           << strerror(errno);
+                n_error++;
+                continue;
+            }
+            llen = sprintf(
+                read_buf,
+                "%s%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X%08X",
+                kCpioMagic, static_cast<int>(st.st_ino), st.st_mode, st.st_uid,
+                st.st_gid, static_cast<int>(st.st_nlink),
+                static_cast<int>(st.st_mtime), static_cast<int>(st.st_size),
+                major(st.st_dev), minor(st.st_dev), major(st.st_rdev),
+                minor(st.st_rdev), static_cast<uint32_t>(file_name_len), 0);
+            if (write(out_fd, read_buf, llen) == -1) {
+                LOG(ERROR) << "Error writing cpio header to file "
+                           << cur_file_path << " " << strerror(errno);
+                n_error++;
+                return n_error;
+            }
+            if (write(out_fd, cur_file_name.c_str(), file_name_len) == -1) {
+                LOG(ERROR) << "Error writing filename to file " << cur_file_path
+                           << " " << strerror(errno);
+                n_error++;
+                return n_error;
+            }
+
+            // NUL Pad header up to 4 multiple bytes.
+            llen = (llen + file_name_len) % 4;
+            if (llen != 0) {
+                const uint32_t zero = 0;
+                if (write(out_fd, &zero, 4 - llen) == -1) {
+                    LOG(ERROR) << "Error padding 0s to file " << cur_file_path
+                               << " " << strerror(errno);
+                    n_error++;
+                    return n_error;
+                }
+            }
+
+            // writing content of file
+            llen = st.st_size;
+            while (llen > 0) {
+                ssize_t bytes_read = read(fd_read, read_buf, sizeof(read_buf));
+                if (bytes_read == -1) {
+                    LOG(ERROR) << "Error reading file " << cur_file_path << " "
+                               << strerror(errno);
+                    n_error++;
+                    return n_error;
+                }
+                llen -= bytes_read;
+                if (write(out_fd, read_buf, bytes_read) == -1) {
+                    LOG(ERROR) << "Error writing data to file " << cur_file_path
+                               << " " << strerror(errno);
+                    n_error++;
+                    return n_error;
+                }
+                if (bytes_read ==
+                    0) {  // this should never happen, but just in case
+                          // to unstuck from while loop
+                    LOG(ERROR) << "Unexpected file size for " << cur_file_path
+                               << " " << strerror(errno);
+                    n_error++;
+                    break;
+                }
+            }
+            llen = st.st_size % 4;
+            if (llen != 0) {
+                const uint32_t zero = 0;
+                write(out_fd, &zero, 4 - llen);
+            }
+        } else {
+            LOG(ERROR) << "Failed to get file stat for " << cur_file_path
+                       << ": " << strerror(errno);
+            n_error++;
+        }
+    }
+    memset(read_buf, 0, sizeof(read_buf));
+    if (write(out_fd, read_buf,
+              sprintf(read_buf, "070701%040X%056X%08XTRAILER!!!", 1, 0x0b, 0) +
+                  4) == -1) {
+        LOG(ERROR) << "Error writing trailing bytes " << strerror(errno);
+        n_error++;
+    }
+    return n_error;
+}
+
+// Helper function to create a non-const char*.
+std::vector<char> makeCharVec(const std::string& str) {
+    std::vector<char> vec(str.size() + 1);
+    vec.assign(str.begin(), str.end());
+    vec.push_back('\0');
+    return vec;
+}
+
 }  // namespace
 
 namespace android {
@@ -136,7 +306,7 @@ Return<void> WifiChip::getId(getId_cb hidl_status_cb) {
 }
 
 Return<void> WifiChip::registerEventCallback(
-    const sp<IWifiChipEventCallback>& event_callback,
+    const sp<V1_0::IWifiChipEventCallback>& event_callback,
     registerEventCallback_cb hidl_status_cb) {
     return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
                            &WifiChip::registerEventCallbackInternal,
@@ -337,7 +507,7 @@ Return<void> WifiChip::enableDebugErrorAlerts(
 }
 
 Return<void> WifiChip::selectTxPowerScenario(
-    TxPowerScenario scenario, selectTxPowerScenario_cb hidl_status_cb) {
+    V1_1::IWifiChip::TxPowerScenario scenario, selectTxPowerScenario_cb hidl_status_cb) {
     return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
                            &WifiChip::selectTxPowerScenarioInternal,
                            hidl_status_cb, scenario);
@@ -348,6 +518,38 @@ Return<void> WifiChip::resetTxPowerScenario(
     return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
                            &WifiChip::resetTxPowerScenarioInternal,
                            hidl_status_cb);
+}
+
+Return<void> WifiChip::registerEventCallback_1_2(
+    const sp<IWifiChipEventCallback>& event_callback,
+    registerEventCallback_cb hidl_status_cb) {
+    return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
+                           &WifiChip::registerEventCallbackInternal_1_2,
+                           hidl_status_cb, event_callback);
+}
+
+Return<void> WifiChip::selectTxPowerScenario_1_2(
+        TxPowerScenario scenario, selectTxPowerScenario_cb hidl_status_cb) {
+    return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
+            &WifiChip::selectTxPowerScenarioInternal_1_2, hidl_status_cb, scenario);
+}
+
+Return<void> WifiChip::debug(const hidl_handle& handle,
+                             const hidl_vec<hidl_string>&) {
+    if (handle != nullptr && handle->numFds >= 1) {
+        int fd = handle->data[0];
+        if (!writeRingbufferFilesInternal()) {
+            LOG(ERROR) << "Error writing files to flash";
+        }
+        uint32_t n_error = cpioFilesInDir(fd, kTombstoneFolderPath);
+        if (n_error != 0) {
+            LOG(ERROR) << n_error << " errors occured in cpio function";
+        }
+        fsync(fd);
+    } else {
+        LOG(ERROR) << "File handle error";
+    }
+    return Void();
 }
 
 void WifiChip::invalidateAndRemoveAllIfaces() {
@@ -368,11 +570,9 @@ std::pair<WifiStatus, ChipId> WifiChip::getIdInternal() {
 }
 
 WifiStatus WifiChip::registerEventCallbackInternal(
-    const sp<IWifiChipEventCallback>& event_callback) {
-    if (!event_cb_handler_.addCallback(event_callback)) {
-        return createWifiStatus(WifiStatusCode::ERROR_UNKNOWN);
-    }
-    return createWifiStatus(WifiStatusCode::SUCCESS);
+    const sp<V1_0::IWifiChipEventCallback>& /* event_callback */) {
+    // Deprecated support for this callback.
+    return createWifiStatus(WifiStatusCode::ERROR_NOT_SUPPORTED);
 }
 
 std::pair<WifiStatus, uint32_t> WifiChip::getCapabilitiesInternal() {
@@ -727,6 +927,8 @@ WifiStatus WifiChip::startLoggingToDebugRingBufferInternal(
                 std::underlying_type<WifiDebugRingBufferVerboseLevel>::type>(
                 verbose_level),
             max_interval_in_sec, min_data_size_in_bytes);
+    ringbuffer_map_.insert(std::pair<std::string, Ringbuffer>(
+        ring_name, Ringbuffer(kMaxBufferSizeBytes)));
     return createWifiStatusFromLegacyError(legacy_status);
 }
 
@@ -738,6 +940,7 @@ WifiStatus WifiChip::forceDumpToDebugRingBufferInternal(
     }
     legacy_hal::wifi_error legacy_status =
         legacy_hal_.lock()->getRingBufferData(getWlan0IfaceName(), ring_name);
+
     return createWifiStatusFromLegacyError(legacy_status);
 }
 
@@ -793,7 +996,8 @@ WifiStatus WifiChip::enableDebugErrorAlertsInternal(bool enable) {
     return createWifiStatusFromLegacyError(legacy_status);
 }
 
-WifiStatus WifiChip::selectTxPowerScenarioInternal(TxPowerScenario scenario) {
+WifiStatus WifiChip::selectTxPowerScenarioInternal(
+        V1_1::IWifiChip::TxPowerScenario scenario) {
     auto legacy_status = legacy_hal_.lock()->selectTxPowerScenario(
         getWlan0IfaceName(),
         hidl_struct_util::convertHidlTxPowerScenarioToLegacy(scenario));
@@ -803,6 +1007,21 @@ WifiStatus WifiChip::selectTxPowerScenarioInternal(TxPowerScenario scenario) {
 WifiStatus WifiChip::resetTxPowerScenarioInternal() {
     auto legacy_status =
         legacy_hal_.lock()->resetTxPowerScenario(getWlan0IfaceName());
+    return createWifiStatusFromLegacyError(legacy_status);
+}
+
+WifiStatus WifiChip::registerEventCallbackInternal_1_2(
+    const sp<IWifiChipEventCallback>& event_callback) {
+    if (!event_cb_handler_.addCallback(event_callback)) {
+        return createWifiStatus(WifiStatusCode::ERROR_UNKNOWN);
+    }
+    return createWifiStatus(WifiStatusCode::SUCCESS);
+}
+
+WifiStatus WifiChip::selectTxPowerScenarioInternal_1_2(TxPowerScenario scenario) {
+    auto legacy_status = legacy_hal_.lock()->selectTxPowerScenario(
+        getWlan0IfaceName(),
+        hidl_struct_util::convertHidlTxPowerScenarioToLegacy_1_2(scenario));
     return createWifiStatusFromLegacyError(legacy_status);
 }
 
@@ -839,6 +1058,13 @@ WifiStatus WifiChip::handleChipConfiguration(
                    << legacyErrorToString(legacy_status);
         return createWifiStatusFromLegacyError(legacy_status);
     }
+    // Every time the HAL is restarted, we need to register the
+    // radio mode change callback.
+    WifiStatus status = registerRadioModeChangeCallback();
+    if (status.code != WifiStatusCode::SUCCESS) {
+        // This probably is not a critical failure?
+        LOG(ERROR) << "Failed to register radio mode change callback";
+    }
     return createWifiStatus(WifiStatusCode::SUCCESS);
 }
 
@@ -849,7 +1075,7 @@ WifiStatus WifiChip::registerDebugRingBufferCallback() {
 
     android::wp<WifiChip> weak_ptr_this(this);
     const auto& on_ring_buffer_data_callback =
-        [weak_ptr_this](const std::string& /* name */,
+        [weak_ptr_this](const std::string& name,
                         const std::vector<uint8_t>& data,
                         const legacy_hal::wifi_ring_buffer_status& status) {
             const auto shared_ptr_this = weak_ptr_this.promote();
@@ -863,13 +1089,13 @@ WifiStatus WifiChip::registerDebugRingBufferCallback() {
                 LOG(ERROR) << "Error converting ring buffer status";
                 return;
             }
-            for (const auto& callback : shared_ptr_this->getEventCallbacks()) {
-                if (!callback->onDebugRingBufferDataAvailable(hidl_status, data)
-                         .isOk()) {
-                    LOG(ERROR)
-                        << "Failed to invoke onDebugRingBufferDataAvailable"
-                        << " callback on: " << toString(callback);
-                }
+            const auto& target = shared_ptr_this->ringbuffer_map_.find(name);
+            if (target != shared_ptr_this->ringbuffer_map_.end()) {
+                Ringbuffer& cur_buffer = target->second;
+                cur_buffer.append(data);
+            } else {
+                LOG(ERROR) << "Ringname " << name << " not found";
+                return;
             }
         };
     legacy_hal::wifi_error legacy_status =
@@ -879,6 +1105,36 @@ WifiStatus WifiChip::registerDebugRingBufferCallback() {
     if (legacy_status == legacy_hal::WIFI_SUCCESS) {
         debug_ring_buffer_cb_registered_ = true;
     }
+    return createWifiStatusFromLegacyError(legacy_status);
+}
+
+WifiStatus WifiChip::registerRadioModeChangeCallback() {
+    android::wp<WifiChip> weak_ptr_this(this);
+    const auto& on_radio_mode_change_callback =
+        [weak_ptr_this](const std::vector<legacy_hal::WifiMacInfo>& mac_infos) {
+            const auto shared_ptr_this = weak_ptr_this.promote();
+            if (!shared_ptr_this.get() || !shared_ptr_this->isValid()) {
+                LOG(ERROR) << "Callback invoked on an invalid object";
+                return;
+            }
+            std::vector<IWifiChipEventCallback::RadioModeInfo>
+                hidl_radio_mode_infos;
+            if (!hidl_struct_util::convertLegacyWifiMacInfosToHidl(
+                    mac_infos, &hidl_radio_mode_infos)) {
+                LOG(ERROR) << "Error converting wifi mac info";
+                return;
+            }
+            for (const auto& callback : shared_ptr_this->getEventCallbacks()) {
+                if (!callback->onRadioModeChange(hidl_radio_mode_infos)
+                         .isOk()) {
+                    LOG(ERROR) << "Failed to invoke onRadioModeChange"
+                               << " callback on: " << toString(callback);
+                }
+            }
+        };
+    legacy_hal::wifi_error legacy_status =
+        legacy_hal_.lock()->registerRadioModeChangeCallbackHandler(
+            getWlan0IfaceName(), on_radio_mode_change_callback);
     return createWifiStatusFromLegacyError(legacy_status);
 }
 
@@ -1078,6 +1334,35 @@ std::string WifiChip::allocateApOrStaIfaceName() {
     // This should never happen. We screwed up somewhere if it did.
     CHECK(0) << "wlan0 and wlan1 in use already!";
     return {};
+}
+
+bool WifiChip::writeRingbufferFilesInternal() {
+    if (!removeOldFilesInternal()) {
+        LOG(ERROR) << "Error occurred while deleting old tombstone files";
+        return false;
+    }
+    // write ringbuffers to file
+    for (const auto& item : ringbuffer_map_) {
+        const Ringbuffer& cur_buffer = item.second;
+        if (cur_buffer.getData().empty()) {
+            continue;
+        }
+        const std::string file_path_raw =
+            kTombstoneFolderPath + item.first + "XXXXXXXXXX";
+        const int dump_fd = mkstemp(makeCharVec(file_path_raw).data());
+        if (dump_fd == -1) {
+            LOG(ERROR) << "create file failed: " << strerror(errno);
+            return false;
+        }
+        unique_fd file_auto_closer(dump_fd);
+        for (const auto& cur_block : cur_buffer.getData()) {
+            if (write(dump_fd, cur_block.data(),
+                      sizeof(cur_block[0]) * cur_block.size()) == -1) {
+                LOG(ERROR) << "Error writing to file " << strerror(errno);
+            }
+        }
+    }
+    return true;
 }
 
 }  // namespace implementation

@@ -66,12 +66,14 @@ convertLegacyLoggerFeatureToHidlStaIfaceCapability(uint32_t feature) {
     return {};
 }
 
-V1_1::IWifiChip::ChipCapabilityMask convertLegacyFeatureToHidlChipCapability(
+IWifiChip::ChipCapabilityMask convertLegacyFeatureToHidlChipCapability(
     uint32_t feature) {
-    using HidlChipCaps = V1_1::IWifiChip::ChipCapabilityMask;
+    using HidlChipCaps = IWifiChip::ChipCapabilityMask;
     switch (feature) {
         case WIFI_FEATURE_SET_TX_POWER_LIMIT:
             return HidlChipCaps::SET_TX_POWER_LIMIT;
+        case WIFI_FEATURE_USE_BODY_HEAD_SAR:
+            return HidlChipCaps::USE_BODY_HEAD_SAR;
         case WIFI_FEATURE_D2D_RTT:
             return HidlChipCaps::D2D_RTT;
         case WIFI_FEATURE_D2AP_RTT:
@@ -135,6 +137,7 @@ bool convertLegacyFeaturesToHidlChipCapabilities(
         }
     }
     for (const auto feature : {WIFI_FEATURE_SET_TX_POWER_LIMIT,
+                               WIFI_FEATURE_USE_BODY_HEAD_SAR,
                                WIFI_FEATURE_D2D_RTT, WIFI_FEATURE_D2AP_RTT}) {
         if (feature & legacy_feature_set) {
             *hidl_caps |= convertLegacyFeatureToHidlChipCapability(feature);
@@ -260,10 +263,81 @@ bool convertLegacyWakeReasonStatsToHidl(
 legacy_hal::wifi_power_scenario convertHidlTxPowerScenarioToLegacy(
     V1_1::IWifiChip::TxPowerScenario hidl_scenario) {
     switch (hidl_scenario) {
-        case V1_1::IWifiChip::TxPowerScenario::VOICE_CALL:
+        // This is the only supported scenario for V1_1
+      case V1_1::IWifiChip::TxPowerScenario::VOICE_CALL:
             return legacy_hal::WIFI_POWER_SCENARIO_VOICE_CALL;
     };
     CHECK(false);
+}
+
+legacy_hal::wifi_power_scenario convertHidlTxPowerScenarioToLegacy_1_2(
+    IWifiChip::TxPowerScenario hidl_scenario) {
+    switch (hidl_scenario) {
+        // This is the only supported scenario for V1_1
+        case IWifiChip::TxPowerScenario::VOICE_CALL:
+            return legacy_hal::WIFI_POWER_SCENARIO_VOICE_CALL;
+        // Those are the supported scenarios for V1_2
+        case IWifiChip::TxPowerScenario::ON_HEAD_CELL_OFF:
+            return legacy_hal::WIFI_POWER_SCENARIO_ON_HEAD_CELL_OFF;
+        case IWifiChip::TxPowerScenario::ON_HEAD_CELL_ON:
+            return legacy_hal::WIFI_POWER_SCENARIO_ON_HEAD_CELL_ON;
+        case IWifiChip::TxPowerScenario::ON_BODY_CELL_OFF:
+            return legacy_hal::WIFI_POWER_SCENARIO_ON_BODY_CELL_OFF;
+        case IWifiChip::TxPowerScenario::ON_BODY_CELL_ON:
+            return legacy_hal::WIFI_POWER_SCENARIO_ON_BODY_CELL_ON;
+    };
+    CHECK(false);
+}
+
+bool convertLegacyWifiMacInfoToHidl(
+    const legacy_hal::WifiMacInfo& legacy_mac_info,
+    IWifiChipEventCallback::RadioModeInfo* hidl_radio_mode_info) {
+    if (!hidl_radio_mode_info) {
+        return false;
+    }
+    *hidl_radio_mode_info = {};
+
+    hidl_radio_mode_info->radioId = legacy_mac_info.wlan_mac_id;
+    // Convert from bitmask of bands in the legacy HAL to enum value in
+    // the HIDL interface.
+    if (legacy_mac_info.mac_band & legacy_hal::WLAN_MAC_2_4_BAND &&
+        legacy_mac_info.mac_band & legacy_hal::WLAN_MAC_5_0_BAND) {
+        hidl_radio_mode_info->bandInfo = WifiBand::BAND_24GHZ_5GHZ;
+    } else if (legacy_mac_info.mac_band & legacy_hal::WLAN_MAC_2_4_BAND) {
+        hidl_radio_mode_info->bandInfo = WifiBand::BAND_24GHZ;
+    } else if (legacy_mac_info.mac_band & legacy_hal::WLAN_MAC_5_0_BAND) {
+        hidl_radio_mode_info->bandInfo = WifiBand::BAND_5GHZ;
+    } else {
+        hidl_radio_mode_info->bandInfo = WifiBand::BAND_UNSPECIFIED;
+    }
+    std::vector<IWifiChipEventCallback::IfaceInfo> iface_info_vec;
+    for (const auto& legacy_iface_info : legacy_mac_info.iface_infos) {
+        IWifiChipEventCallback::IfaceInfo iface_info;
+        iface_info.name = legacy_iface_info.name;
+        iface_info.channel = legacy_iface_info.channel;
+        iface_info_vec.push_back(iface_info);
+    }
+    hidl_radio_mode_info->ifaceInfos = iface_info_vec;
+    return true;
+}
+
+bool convertLegacyWifiMacInfosToHidl(
+    const std::vector<legacy_hal::WifiMacInfo>& legacy_mac_infos,
+    std::vector<IWifiChipEventCallback::RadioModeInfo>* hidl_radio_mode_infos) {
+    if (!hidl_radio_mode_infos) {
+        return false;
+    }
+    *hidl_radio_mode_infos = {};
+
+    for (const auto& legacy_mac_info : legacy_mac_infos) {
+        IWifiChipEventCallback::RadioModeInfo hidl_radio_mode_info;
+        if (!convertLegacyWifiMacInfoToHidl(legacy_mac_info,
+                                            &hidl_radio_mode_info)) {
+            return false;
+        }
+        hidl_radio_mode_infos->push_back(hidl_radio_mode_info);
+    }
+    return true;
 }
 
 bool convertLegacyFeaturesToHidlStaCapabilities(
@@ -1118,6 +1192,35 @@ bool convertHidlNanEnableRequestToLegacy(
     return true;
 }
 
+bool convertHidlNanEnableRequest_1_2ToLegacy(
+    const NanEnableRequest& hidl_request1,
+    const NanConfigRequestSupplemental& hidl_request2,
+    legacy_hal::NanEnableRequest* legacy_request) {
+    if (!legacy_request) {
+        LOG(ERROR)
+            << "convertHidlNanEnableRequest_1_2ToLegacy: null legacy_request";
+        return false;
+    }
+
+    *legacy_request = {};
+    if (!convertHidlNanEnableRequestToLegacy(hidl_request1, legacy_request)) {
+        return false;
+    }
+
+    legacy_request->config_discovery_beacon_int = 1;
+    legacy_request->discovery_beacon_interval =
+        hidl_request2.discoveryBeaconIntervalMs;
+    legacy_request->config_nss = 1;
+    legacy_request->nss = hidl_request2.numberOfSpatialStreamsInDiscovery;
+    legacy_request->config_dw_early_termination = 1;
+    legacy_request->enable_dw_termination =
+        hidl_request2.enableDiscoveryWindowEarlyTermination;
+    legacy_request->config_enable_ranging = 1;
+    legacy_request->enable_ranging = hidl_request2.enableRanging;
+
+    return true;
+}
+
 bool convertHidlNanPublishRequestToLegacy(
     const NanPublishRequest& hidl_request,
     legacy_hal::NanPublishRequest* legacy_request) {
@@ -1600,6 +1703,35 @@ bool convertHidlNanConfigRequestToLegacy(
     return true;
 }
 
+bool convertHidlNanConfigRequest_1_2ToLegacy(
+    const NanConfigRequest& hidl_request1,
+    const NanConfigRequestSupplemental& hidl_request2,
+    legacy_hal::NanConfigRequest* legacy_request) {
+    if (!legacy_request) {
+        LOG(ERROR) << "convertHidlNanConfigRequest_1_2ToLegacy: legacy_request "
+                      "is null";
+        return false;
+    }
+
+    *legacy_request = {};
+    if (!convertHidlNanConfigRequestToLegacy(hidl_request1, legacy_request)) {
+        return false;
+    }
+
+    legacy_request->config_discovery_beacon_int = 1;
+    legacy_request->discovery_beacon_interval =
+        hidl_request2.discoveryBeaconIntervalMs;
+    legacy_request->config_nss = 1;
+    legacy_request->nss = hidl_request2.numberOfSpatialStreamsInDiscovery;
+    legacy_request->config_dw_early_termination = 1;
+    legacy_request->enable_dw_termination =
+        hidl_request2.enableDiscoveryWindowEarlyTermination;
+    legacy_request->config_enable_ranging = 1;
+    legacy_request->enable_ranging = hidl_request2.enableRanging;
+
+    return true;
+}
+
 bool convertHidlNanDataPathInitiatorRequestToLegacy(
     const NanInitiateDataPathRequest& hidl_request,
     legacy_hal::NanDataPathInitiatorRequest* legacy_request) {
@@ -1902,6 +2034,22 @@ bool convertLegacyNanDataPathRequestIndToHidl(
     return true;
 }
 
+bool convertLegacyNdpChannelInfoToHidl(
+    const legacy_hal::NanChannelInfo& legacy_struct,
+    NanDataPathChannelInfo* hidl_struct) {
+    if (!hidl_struct) {
+        LOG(ERROR) << "convertLegacyNdpChannelInfoToHidl: hidl_struct is null";
+        return false;
+    }
+    *hidl_struct = {};
+
+    hidl_struct->channelFreq = legacy_struct.channel;
+    hidl_struct->channelBandwidth = legacy_struct.bandwidth;
+    hidl_struct->numSpatialStreams = legacy_struct.nss;
+
+    return true;
+}
+
 bool convertLegacyNanDataPathConfirmIndToHidl(
     const legacy_hal::NanDataPathConfirmInd& legacy_ind,
     NanDataPathConfirmInd* hidl_ind) {
@@ -1912,18 +2060,60 @@ bool convertLegacyNanDataPathConfirmIndToHidl(
     }
     *hidl_ind = {};
 
-    hidl_ind->ndpInstanceId = legacy_ind.ndp_instance_id;
-    hidl_ind->dataPathSetupSuccess =
+    hidl_ind->V1_0.ndpInstanceId = legacy_ind.ndp_instance_id;
+    hidl_ind->V1_0.dataPathSetupSuccess =
         legacy_ind.rsp_code == legacy_hal::NAN_DP_REQUEST_ACCEPT;
-    hidl_ind->peerNdiMacAddr =
+    hidl_ind->V1_0.peerNdiMacAddr =
         hidl_array<uint8_t, 6>(legacy_ind.peer_ndi_mac_addr);
-    hidl_ind->appInfo =
+    hidl_ind->V1_0.appInfo =
         std::vector<uint8_t>(legacy_ind.app_info.ndp_app_info,
                              legacy_ind.app_info.ndp_app_info +
                                  legacy_ind.app_info.ndp_app_info_len);
-    hidl_ind->status.status =
+    hidl_ind->V1_0.status.status =
         convertLegacyNanStatusTypeToHidl(legacy_ind.reason_code);
-    hidl_ind->status.description = "";  // TODO: b/34059183
+    hidl_ind->V1_0.status.description = "";  // TODO: b/34059183
+
+    std::vector<NanDataPathChannelInfo> channelInfo;
+    for (unsigned int i = 0; i < legacy_ind.num_channels; ++i) {
+        NanDataPathChannelInfo hidl_struct;
+        if (!convertLegacyNdpChannelInfoToHidl(legacy_ind.channel_info[i],
+                                               &hidl_struct)) {
+            return false;
+        }
+        channelInfo.push_back(hidl_struct);
+    }
+    hidl_ind->channelInfo = channelInfo;
+
+    return true;
+}
+
+bool convertLegacyNanDataPathScheduleUpdateIndToHidl(
+    const legacy_hal::NanDataPathScheduleUpdateInd& legacy_ind,
+    NanDataPathScheduleUpdateInd* hidl_ind) {
+    if (!hidl_ind) {
+        LOG(ERROR) << "convertLegacyNanDataPathScheduleUpdateIndToHidl: "
+                      "hidl_ind is null";
+        return false;
+    }
+    *hidl_ind = {};
+
+    hidl_ind->peerDiscoveryAddress =
+        hidl_array<uint8_t, 6>(legacy_ind.peer_mac_addr);
+    std::vector<NanDataPathChannelInfo> channelInfo;
+    for (unsigned int i = 0; i < legacy_ind.num_channels; ++i) {
+        NanDataPathChannelInfo hidl_struct;
+        if (!convertLegacyNdpChannelInfoToHidl(legacy_ind.channel_info[i],
+                                               &hidl_struct)) {
+            return false;
+        }
+        channelInfo.push_back(hidl_struct);
+    }
+    hidl_ind->channelInfo = channelInfo;
+    std::vector<uint32_t> ndpInstanceIds;
+    for (unsigned int i = 0; i < legacy_ind.num_ndp_instances; ++i) {
+        ndpInstanceIds.push_back(legacy_ind.ndp_instance_id[i]);
+    }
+    hidl_ind->ndpInstanceIds = ndpInstanceIds;
 
     return true;
 }

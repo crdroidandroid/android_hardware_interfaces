@@ -17,12 +17,14 @@
 #ifndef WIFI_CHIP_H_
 #define WIFI_CHIP_H_
 
+#include <list>
 #include <map>
 
 #include <android-base/macros.h>
 #include <android/hardware/wifi/1.2/IWifiChip.h>
 
 #include "hidl_callback_util.h"
+#include "ringbuffer.h"
 #include "wifi_ap_iface.h"
 #include "wifi_feature_flags.h"
 #include "wifi_legacy_hal.h"
@@ -72,7 +74,7 @@ class WifiChip : public V1_2::IWifiChip {
     // HIDL methods exposed.
     Return<void> getId(getId_cb hidl_status_cb) override;
     Return<void> registerEventCallback(
-        const sp<IWifiChipEventCallback>& event_callback,
+        const sp<V1_0::IWifiChipEventCallback>& event_callback,
         registerEventCallback_cb hidl_status_cb) override;
     Return<void> getCapabilities(getCapabilities_cb hidl_status_cb) override;
     Return<void> getAvailableModes(
@@ -130,18 +132,25 @@ class WifiChip : public V1_2::IWifiChip {
     Return<void> enableDebugErrorAlerts(
         bool enable, enableDebugErrorAlerts_cb hidl_status_cb) override;
     Return<void> selectTxPowerScenario(
-        TxPowerScenario scenario,
+        V1_1::IWifiChip::TxPowerScenario scenario,
         selectTxPowerScenario_cb hidl_status_cb) override;
     Return<void> resetTxPowerScenario(
         resetTxPowerScenario_cb hidl_status_cb) override;
-
+    Return<void> registerEventCallback_1_2(
+        const sp<IWifiChipEventCallback>& event_callback,
+        registerEventCallback_1_2_cb hidl_status_cb) override;
+    Return<void> selectTxPowerScenario_1_2(
+        TxPowerScenario scenario,
+        selectTxPowerScenario_cb hidl_status_cb) override;
+    Return<void> debug(const hidl_handle& handle,
+                       const hidl_vec<hidl_string>& options) override;
    private:
     void invalidateAndRemoveAllIfaces();
 
     // Corresponding worker functions for the HIDL methods.
     std::pair<WifiStatus, ChipId> getIdInternal();
     WifiStatus registerEventCallbackInternal(
-        const sp<IWifiChipEventCallback>& event_callback);
+        const sp<V1_0::IWifiChipEventCallback>& event_callback);
     std::pair<WifiStatus, uint32_t> getCapabilitiesInternal();
     std::pair<WifiStatus, std::vector<ChipMode>> getAvailableModesInternal();
     WifiStatus configureChipInternal(
@@ -186,12 +195,15 @@ class WifiChip : public V1_2::IWifiChip {
     std::pair<WifiStatus, WifiDebugHostWakeReasonStats>
     getDebugHostWakeReasonStatsInternal();
     WifiStatus enableDebugErrorAlertsInternal(bool enable);
-    WifiStatus selectTxPowerScenarioInternal(TxPowerScenario scenario);
+    WifiStatus selectTxPowerScenarioInternal(V1_1::IWifiChip::TxPowerScenario scenario);
     WifiStatus resetTxPowerScenarioInternal();
-
+    WifiStatus registerEventCallbackInternal_1_2(
+        const sp<IWifiChipEventCallback>& event_callback);
+    WifiStatus selectTxPowerScenarioInternal_1_2(TxPowerScenario scenario);
     WifiStatus handleChipConfiguration(
         std::unique_lock<std::recursive_mutex>* lock, ChipModeId mode_id);
     WifiStatus registerDebugRingBufferCallback();
+    WifiStatus registerRadioModeChangeCallback();
 
     void populateModes();
     std::vector<IWifiChip::ChipIfaceCombination>
@@ -204,6 +216,7 @@ class WifiChip : public V1_2::IWifiChip {
     bool canCurrentModeSupportIfaceOfType(IfaceType type);
     bool isValidModeId(ChipModeId mode_id);
     std::string allocateApOrStaIfaceName();
+    bool writeRingbufferFilesInternal();
 
     ChipId chip_id_;
     std::weak_ptr<legacy_hal::WifiLegacyHal> legacy_hal_;
@@ -214,6 +227,7 @@ class WifiChip : public V1_2::IWifiChip {
     std::vector<sp<WifiP2pIface>> p2p_ifaces_;
     std::vector<sp<WifiStaIface>> sta_ifaces_;
     std::vector<sp<WifiRttController>> rtt_controllers_;
+    std::map<std::string, Ringbuffer> ringbuffer_map_;
     bool is_valid_;
     // Members pertaining to chip configuration.
     uint32_t current_mode_id_;
