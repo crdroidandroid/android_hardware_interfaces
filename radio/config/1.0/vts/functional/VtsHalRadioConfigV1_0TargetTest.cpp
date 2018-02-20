@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The Android Open Source Project
+ * Copyright (C) 2018 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,16 +14,13 @@
  * limitations under the License.
  */
 
-package android.hardware.broadcastradio@1.2;
+#include <radio_config_hidl_hal_utils.h>
 
-import @1.1::IBroadcastRadioFactory;
-
-/**
- * To use 1.2 features you must cast specific interfaces returned from the
- * 1.0 HAL. For example V1_0::IBroadcastRadio::openTuner() returns V1_0::ITuner,
- * which can be cast with V1_2::ITuner::castFrom() call.
- *
- * The 1.2 server must always return the 1.2 version of specific interface.
- */
-interface IBroadcastRadioFactory extends @1.1::IBroadcastRadioFactory {
-};
+int main(int argc, char** argv) {
+    ::testing::AddGlobalTestEnvironment(RadioConfigHidlEnvironment::Instance());
+    ::testing::InitGoogleTest(&argc, argv);
+    RadioConfigHidlEnvironment::Instance()->init(&argc, argv);
+    int status = RUN_ALL_TESTS();
+    LOG(INFO) << "Test result = " << status;
+    return status;
+}
