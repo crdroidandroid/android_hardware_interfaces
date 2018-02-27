@@ -8,6 +8,7 @@ hidl_interface {
     },
     srcs: [
         "types.hal",
+        "ICameraDeviceCallback.hal",
         "ICameraDeviceSession.hal",
     ],
     interfaces: [
@@ -18,6 +19,14 @@ hidl_interface {
         "android.hidl.base@1.0",
     ],
     types: [
+        "CaptureRequest",
+        "CaptureResult",
+        "HalStream",
+        "HalStreamConfiguration",
+        "PhysicalCameraMetadata",
+        "PhysicalCameraSetting",
+        "RequestTemplate",
+        "Stream",
         "StreamConfiguration",
     ],
     gen_java: false,

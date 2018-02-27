@@ -23,8 +23,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <IComposerCommandBuffer.h>
 #include <android/hardware/graphics/composer/2.1/IComposer.h>
+#include <composer-command-buffer/2.1/ComposerCommandBuffer.h>
 #include <utils/StrongPointer.h>
 
 #include "TestCommandReader.h"
@@ -58,10 +58,12 @@ class Composer {
   std::string dumpDebugInfo();
   std::unique_ptr<ComposerClient> createClient();
 
+ protected:
+  sp<IComposer> mComposer;
+
  private:
   void init();
 
-  sp<IComposer> mComposer;
   std::unordered_set<IComposer::Capability> mCapabilities;
 };
 

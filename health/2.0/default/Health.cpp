@@ -18,6 +18,7 @@
 
 #include <health2/Health.h>
 
+#include <hal_conversion.h>
 #include <hidl/HidlTransportSupport.h>
 
 extern void healthd_battery_update_internal(bool);
@@ -108,27 +109,27 @@ void getProperty(const std::unique_ptr<BatteryMonitor>& monitor, int id, T defau
 }
 
 Return<void> Health::getChargeCounter(getChargeCounter_cb _hidl_cb) {
-    getProperty(battery_monitor_, BATTERY_PROP_CHARGE_COUNTER, INT32_MIN, _hidl_cb);
+    getProperty<int32_t>(battery_monitor_, BATTERY_PROP_CHARGE_COUNTER, 0, _hidl_cb);
     return Void();
 }
 
 Return<void> Health::getCurrentNow(getCurrentNow_cb _hidl_cb) {
-    getProperty(battery_monitor_, BATTERY_PROP_CURRENT_NOW, INT32_MIN, _hidl_cb);
+    getProperty<int32_t>(battery_monitor_, BATTERY_PROP_CURRENT_NOW, 0, _hidl_cb);
     return Void();
 }
 
 Return<void> Health::getCurrentAverage(getCurrentAverage_cb _hidl_cb) {
-    getProperty(battery_monitor_, BATTERY_PROP_CURRENT_AVG, INT32_MIN, _hidl_cb);
+    getProperty<int32_t>(battery_monitor_, BATTERY_PROP_CURRENT_AVG, 0, _hidl_cb);
     return Void();
 }
 
 Return<void> Health::getCapacity(getCapacity_cb _hidl_cb) {
-    getProperty(battery_monitor_, BATTERY_PROP_CAPACITY, INT32_MIN, _hidl_cb);
+    getProperty<int32_t>(battery_monitor_, BATTERY_PROP_CAPACITY, 0, _hidl_cb);
     return Void();
 }
 
 Return<void> Health::getEnergyCounter(getEnergyCounter_cb _hidl_cb) {
-    getProperty(battery_monitor_, BATTERY_PROP_ENERGY_COUNTER, INT64_MIN, _hidl_cb);
+    getProperty<int64_t>(battery_monitor_, BATTERY_PROP_ENERGY_COUNTER, 0, _hidl_cb);
     return Void();
 }
 
@@ -154,10 +155,28 @@ Return<Result> Health::update() {
     return Result::SUCCESS;
 }
 
-void Health::notifyListeners(const HealthInfo& info) {
+void Health::notifyListeners(HealthInfo* healthInfo) {
+    std::vector<StorageInfo> info;
+    get_storage_info(info);
+
+    std::vector<DiskStats> stats;
+    get_disk_stats(stats);
+
+    int32_t currentAvg = 0;
+
+    struct BatteryProperty prop;
+    status_t ret = battery_monitor_->getProperty(BATTERY_PROP_CURRENT_AVG, &prop);
+    if (ret == OK) {
+        currentAvg = static_cast<int32_t>(prop.valueInt64);
+    }
+
+    healthInfo->batteryCurrentAverage = currentAvg;
+    healthInfo->diskStats = stats;
+    healthInfo->storageInfos = info;
+
     std::lock_guard<std::mutex> _lock(callbacks_lock_);
     for (auto it = callbacks_.begin(); it != callbacks_.end();) {
-        auto ret = (*it)->healthInfoChanged(info);
+        auto ret = (*it)->healthInfoChanged(*healthInfo);
         if (!ret.isOk() && ret.isDeadObject()) {
             it = callbacks_.erase(it);
         } else {
@@ -196,6 +215,39 @@ Return<void> Health::getDiskStats(getDiskStats_cb _hidl_cb) {
     } else {
         _hidl_cb(Result::SUCCESS, stats_vec);
     }
+    return Void();
+}
+
+Return<void> Health::getHealthInfo(getHealthInfo_cb _hidl_cb) {
+    using android::hardware::health::V1_0::hal_conversion::convertToHealthInfo;
+
+    update();
+    struct android::BatteryProperties p = getBatteryProperties(battery_monitor_.get());
+
+    V1_0::HealthInfo batteryInfo;
+    convertToHealthInfo(&p, batteryInfo);
+
+    std::vector<StorageInfo> info;
+    get_storage_info(info);
+
+    std::vector<DiskStats> stats;
+    get_disk_stats(stats);
+
+    int32_t currentAvg = 0;
+
+    struct BatteryProperty prop;
+    status_t ret = battery_monitor_->getProperty(BATTERY_PROP_CURRENT_AVG, &prop);
+    if (ret == OK) {
+        currentAvg = static_cast<int32_t>(prop.valueInt64);
+    }
+
+    V2_0::HealthInfo healthInfo = {};
+    healthInfo.legacy = std::move(batteryInfo);
+    healthInfo.batteryCurrentAverage = currentAvg;
+    healthInfo.diskStats = stats;
+    healthInfo.storageInfos = info;
+
+    _hidl_cb(Result::SUCCESS, healthInfo);
     return Void();
 }
 

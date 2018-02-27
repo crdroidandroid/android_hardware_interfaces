@@ -441,6 +441,11 @@ AuthorizationSetBuilder& AuthorizationSetBuilder::AesKey(uint32_t key_size) {
     return Authorization(TAG_KEY_SIZE, key_size);
 }
 
+AuthorizationSetBuilder& AuthorizationSetBuilder::TripleDesKey(uint32_t key_size) {
+    Authorization(TAG_ALGORITHM, Algorithm::TRIPLE_DES);
+    return Authorization(TAG_KEY_SIZE, key_size);
+}
+
 AuthorizationSetBuilder& AuthorizationSetBuilder::HmacKey(uint32_t key_size) {
     Authorization(TAG_ALGORITHM, Algorithm::HMAC);
     Authorization(TAG_KEY_SIZE, key_size);
@@ -474,6 +479,11 @@ AuthorizationSetBuilder& AuthorizationSetBuilder::AesEncryptionKey(uint32_t key_
     return EncryptionKey();
 }
 
+AuthorizationSetBuilder& AuthorizationSetBuilder::TripleDesEncryptionKey(uint32_t key_size) {
+    TripleDesKey(key_size);
+    return EncryptionKey();
+}
+
 AuthorizationSetBuilder& AuthorizationSetBuilder::SigningKey() {
     Authorization(TAG_PURPOSE, KeyPurpose::SIGN);
     return Authorization(TAG_PURPOSE, KeyPurpose::VERIFY);
@@ -493,6 +503,18 @@ AuthorizationSetBuilder& AuthorizationSetBuilder::EcbMode() {
     return Authorization(TAG_BLOCK_MODE, BlockMode::ECB);
 }
 
+AuthorizationSetBuilder& AuthorizationSetBuilder::GcmModeMinMacLen(uint32_t minMacLength) {
+    return BlockMode(BlockMode::GCM)
+        .Padding(PaddingMode::NONE)
+        .Authorization(TAG_MIN_MAC_LENGTH, minMacLength);
+}
+
+AuthorizationSetBuilder& AuthorizationSetBuilder::GcmModeMacLen(uint32_t macLength) {
+    return BlockMode(BlockMode::GCM)
+        .Padding(PaddingMode::NONE)
+        .Authorization(TAG_MAC_LENGTH, macLength);
+}
+
 AuthorizationSetBuilder& AuthorizationSetBuilder::BlockMode(
     std::initializer_list<V4_0::BlockMode> blockModes) {
     for (auto mode : blockModes) {
@@ -505,6 +527,14 @@ AuthorizationSetBuilder& AuthorizationSetBuilder::Digest(
     std::initializer_list<V4_0::Digest> digests) {
     for (auto digest : digests) {
         push_back(TAG_DIGEST, digest);
+    }
+    return *this;
+}
+
+AuthorizationSetBuilder& AuthorizationSetBuilder::Padding(
+    std::initializer_list<V4_0::PaddingMode> paddingModes) {
+    for (auto paddingMode : paddingModes) {
+        push_back(TAG_PADDING, paddingMode);
     }
     return *this;
 }
