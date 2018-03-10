@@ -37,6 +37,8 @@ namespace {
 const std::regex kDeviceNameRE("device@([0-9]+\\.[0-9]+)/external/(.+)");
 const int kMaxDevicePathLen = 256;
 const char* kDevicePath = "/dev/";
+constexpr char kPrefix[] = "video";
+constexpr int kPrefixLen = sizeof(kPrefix) - 1;
 
 bool matchDeviceName(const hidl_string& deviceName, std::string* deviceVersion,
                      std::string* cameraId) {
@@ -56,7 +58,9 @@ bool matchDeviceName(const hidl_string& deviceName, std::string* deviceVersion,
 
 } // anonymous namespace
 
-ExternalCameraProvider::ExternalCameraProvider() : mHotPlugThread(this) {
+ExternalCameraProvider::ExternalCameraProvider() :
+        mCfg(ExternalCameraConfig::loadFromCfg()),
+        mHotPlugThread(this) {
     mHotPlugThread.run("ExtCamHotPlug", PRIORITY_BACKGROUND);
 }
 
@@ -67,8 +71,17 @@ ExternalCameraProvider::~ExternalCameraProvider() {
 
 Return<Status> ExternalCameraProvider::setCallback(
         const sp<ICameraProviderCallback>& callback) {
-    Mutex::Autolock _l(mLock);
-    mCallbacks = callback;
+    {
+        Mutex::Autolock _l(mLock);
+        mCallbacks = callback;
+    }
+    // Send a callback for all devices to initialize
+    {
+        for (const auto& pair : mCameraStatusMap) {
+            mCallbacks->cameraDeviceStatusChange(pair.first, pair.second);
+        }
+    }
+
     return Status::OK;
 }
 
@@ -80,14 +93,9 @@ Return<void> ExternalCameraProvider::getVendorTags(getVendorTags_cb _hidl_cb) {
 }
 
 Return<void> ExternalCameraProvider::getCameraIdList(getCameraIdList_cb _hidl_cb) {
-    std::vector<hidl_string> deviceNameList;
-    for (auto const& kvPair : mCameraStatusMap) {
-        if (kvPair.second == CameraDeviceStatus::PRESENT) {
-            deviceNameList.push_back(kvPair.first);
-        }
-    }
-    hidl_vec<hidl_string> hidlDeviceNameList(deviceNameList);
-    ALOGV("ExtCam: number of cameras is %zu", deviceNameList.size());
+    // External camera HAL always report 0 camera, and extra cameras
+    // are just reported via cameraDeviceStatusChange callbacks
+    hidl_vec<hidl_string> hidlDeviceNameList;
     _hidl_cb(Status::OK, hidlDeviceNameList);
     return Void();
 }
@@ -128,7 +136,7 @@ Return<void> ExternalCameraProvider::getCameraDeviceInterface_V3_x(
     sp<device::V3_2::ICameraDevice> device;
     sp<device::V3_4::implementation::ExternalCameraDevice> deviceImpl =
             new device::V3_4::implementation::ExternalCameraDevice(
-                    cameraId);
+                    cameraId, mCfg);
     if (deviceImpl == nullptr || deviceImpl->isInitFailed()) {
         ALOGE("%s: camera device %s init failed!", __FUNCTION__, cameraId.c_str());
         device = nullptr;
@@ -143,7 +151,7 @@ Return<void> ExternalCameraProvider::getCameraDeviceInterface_V3_x(
 }
 
 void ExternalCameraProvider::addExternalCamera(const char* devName) {
-    ALOGE("ExtCam: adding %s to External Camera HAL!", devName);
+    ALOGI("ExtCam: adding %s to External Camera HAL!", devName);
     Mutex::Autolock _l(mLock);
     std::string deviceName = std::string("device@3.4/external/") + devName;
     mCameraStatusMap[deviceName] = CameraDeviceStatus::PRESENT;
@@ -193,7 +201,9 @@ void ExternalCameraProvider::deviceRemoved(const char* devName) {
 }
 
 ExternalCameraProvider::HotplugThread::HotplugThread(ExternalCameraProvider* parent) :
-        Thread(/*canCallJava*/false), mParent(parent) {}
+        Thread(/*canCallJava*/false),
+        mParent(parent),
+        mInternalDevices(parent->mCfg.mInternalDevices) {}
 
 ExternalCameraProvider::HotplugThread::~HotplugThread() {}
 
@@ -206,14 +216,13 @@ bool ExternalCameraProvider::HotplugThread::threadLoop() {
     }
 
     struct dirent* de;
-    // This list is device dependent. TODO: b/72261897 allow setting it from setprop/device boot
-    std::string internalDevices = "0,1";
     while ((de = readdir(devdir)) != 0) {
         // Find external v4l devices that's existing before we start watching and add them
-        if (!strncmp("video", de->d_name, 5)) {
+        if (!strncmp(kPrefix, de->d_name, kPrefixLen)) {
             // TODO: This might reject some valid devices. Ex: internal is 33 and a device named 3
             //       is added.
-            if (internalDevices.find(de->d_name + 5) == std::string::npos) {
+            std::string deviceId(de->d_name + kPrefixLen);
+            if (mInternalDevices.count(deviceId) == 0) {
                 ALOGV("Non-internal v4l device %s found", de->d_name);
                 char v4l2DevicePath[kMaxDevicePathLen];
                 snprintf(v4l2DevicePath, kMaxDevicePathLen,
@@ -248,15 +257,18 @@ bool ExternalCameraProvider::HotplugThread::threadLoop() {
             while (offset < ret) {
                 struct inotify_event* event = (struct inotify_event*)&eventBuf[offset];
                 if (event->wd == mWd) {
-                    if (!strncmp("video", event->name, 5)) {
-                        char v4l2DevicePath[kMaxDevicePathLen];
-                        snprintf(v4l2DevicePath, kMaxDevicePathLen,
-                                "%s%s", kDevicePath, event->name);
-                        if (event->mask & IN_CREATE) {
-                            mParent->deviceAdded(v4l2DevicePath);
-                        }
-                        if (event->mask & IN_DELETE) {
-                            mParent->deviceRemoved(v4l2DevicePath);
+                    if (!strncmp(kPrefix, event->name, kPrefixLen)) {
+                        std::string deviceId(event->name + kPrefixLen);
+                        if (mInternalDevices.count(deviceId) == 0) {
+                            char v4l2DevicePath[kMaxDevicePathLen];
+                            snprintf(v4l2DevicePath, kMaxDevicePathLen,
+                                    "%s%s", kDevicePath, event->name);
+                            if (event->mask & IN_CREATE) {
+                                mParent->deviceAdded(v4l2DevicePath);
+                            }
+                            if (event->mask & IN_DELETE) {
+                                mParent->deviceRemoved(v4l2DevicePath);
+                            }
                         }
                     }
                 }

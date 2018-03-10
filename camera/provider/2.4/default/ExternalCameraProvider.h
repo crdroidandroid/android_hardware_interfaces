@@ -17,12 +17,15 @@
 #ifndef ANDROID_HARDWARE_CAMERA_PROVIDER_V2_4_EXTCAMERAPROVIDER_H
 #define ANDROID_HARDWARE_CAMERA_PROVIDER_V2_4_EXTCAMERAPROVIDER_H
 
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include "utils/Mutex.h"
 #include "utils/Thread.h"
 #include <android/hardware/camera/provider/2.4/ICameraProvider.h>
 #include <hidl/Status.h>
 #include <hidl/MQDescriptor.h>
+#include "ExternalCameraUtils.h"
 
 namespace android {
 namespace hardware {
@@ -34,6 +37,7 @@ namespace implementation {
 using ::android::hardware::camera::common::V1_0::CameraDeviceStatus;
 using ::android::hardware::camera::common::V1_0::Status;
 using ::android::hardware::camera::common::V1_0::VendorTagSection;
+using ::android::hardware::camera::external::common::ExternalCameraConfig;
 using ::android::hardware::camera::provider::V2_4::ICameraProvider;
 using ::android::hardware::camera::provider::V2_4::ICameraProviderCallback;
 using ::android::hardware::Return;
@@ -80,14 +84,17 @@ private:
 
     private:
         ExternalCameraProvider* mParent = nullptr;
+        const std::unordered_set<std::string> mInternalDevices;
 
         int mINotifyFD = -1;
         int mWd = -1;
-    } mHotPlugThread;
+    };
 
     Mutex mLock;
     sp<ICameraProviderCallback> mCallbacks = nullptr;
     std::unordered_map<std::string, CameraDeviceStatus> mCameraStatusMap; // camera id -> status
+    const ExternalCameraConfig mCfg;
+    HotplugThread mHotPlugThread;
 };
 
 
