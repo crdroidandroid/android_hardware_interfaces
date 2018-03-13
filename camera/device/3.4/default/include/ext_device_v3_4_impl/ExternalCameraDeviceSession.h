@@ -35,6 +35,7 @@
 #include "utils/Mutex.h"
 #include "utils/Thread.h"
 #include "android-base/unique_fd.h"
+#include "ExternalCameraUtils.h"
 
 namespace android {
 namespace hardware {
@@ -52,7 +53,7 @@ using ::android::hardware::camera::device::V3_2::ErrorCode;
 using ::android::hardware::camera::device::V3_2::ICameraDeviceCallback;
 using ::android::hardware::camera::device::V3_2::MsgType;
 using ::android::hardware::camera::device::V3_2::NotifyMsg;
-using ::android::hardware::camera::device::V3_4::RequestTemplate;
+using ::android::hardware::camera::device::V3_2::RequestTemplate;
 using ::android::hardware::camera::device::V3_2::Stream;
 using ::android::hardware::camera::device::V3_4::StreamConfiguration;
 using ::android::hardware::camera::device::V3_2::StreamConfigurationMode;
@@ -66,6 +67,9 @@ using ::android::hardware::camera::device::V3_4::ICameraDeviceSession;
 using ::android::hardware::camera::common::V1_0::Status;
 using ::android::hardware::camera::common::V1_0::helper::HandleImporter;
 using ::android::hardware::camera::common::V1_0::helper::ExifUtils;
+using ::android::hardware::camera::external::common::ExternalCameraConfig;
+using ::android::hardware::camera::external::common::Size;
+using ::android::hardware::camera::external::common::SizeHasher;
 using ::android::hardware::graphics::common::V1_0::BufferUsage;
 using ::android::hardware::graphics::common::V1_0::Dataspace;
 using ::android::hardware::graphics::common::V1_0::PixelFormat;
@@ -80,80 +84,14 @@ using ::android::sp;
 using ::android::Mutex;
 using ::android::base::unique_fd;
 
-// TODO: put V4L2 related structs into separate header?
-struct SupportedV4L2Format {
-    uint32_t width;
-    uint32_t height;
-    uint32_t fourcc;
-    // All supported frame rate for this w/h/fourcc combination
-    std::vector<float> frameRates;
-};
-
-// A class provide access to a dequeued V4L2 frame buffer (mostly in MJPG format)
-// Also contains necessary information to enqueue the buffer back to V4L2 buffer queue
-class V4L2Frame : public virtual VirtualLightRefBase {
-public:
-    V4L2Frame(uint32_t w, uint32_t h, uint32_t fourcc, int bufIdx, int fd, uint32_t dataSize);
-    ~V4L2Frame() override;
-    const uint32_t mWidth;
-    const uint32_t mHeight;
-    const uint32_t mFourcc;
-    const int mBufferIndex; // for later enqueue
-    int map(uint8_t** data, size_t* dataSize);
-    int unmap();
-private:
-    Mutex mLock;
-    const int mFd; // used for mmap but doesn't claim ownership
-    const size_t mDataSize;
-    uint8_t* mData = nullptr;
-    bool  mMapped = false;
-};
-
-// A RAII class representing a CPU allocated YUV frame used as intermeidate buffers
-// when generating output images.
-class AllocatedFrame : public virtual VirtualLightRefBase {
-public:
-    AllocatedFrame(uint32_t w, uint32_t h); // TODO: use Size?
-    ~AllocatedFrame() override;
-    const uint32_t mWidth;
-    const uint32_t mHeight;
-    const uint32_t mFourcc; // Only support YU12 format for now
-    int allocate(YCbCrLayout* out = nullptr);
-    int getLayout(YCbCrLayout* out);
-    int getCroppedLayout(const IMapper::Rect&, YCbCrLayout* out); // return non-zero for bad input
-private:
-    Mutex mLock;
-    std::vector<uint8_t> mData;
-};
-
-struct Size {
-    uint32_t width;
-    uint32_t height;
-
-    bool operator==(const Size& other) const {
-        return (width == other.width && height == other.height);
-    }
-};
-
-struct SizeHasher {
-    size_t operator()(const Size& sz) const {
-        size_t result = 1;
-        result = 31 * result + sz.width;
-        result = 31 * result + sz.height;
-        return result;
-    }
-};
-
-enum CroppingType {
-    HORIZONTAL = 0,
-    VERTICAL = 1
-};
-
 struct ExternalCameraDeviceSession : public virtual RefBase {
 
     ExternalCameraDeviceSession(const sp<ICameraDeviceCallback>&,
-            const std::vector<SupportedV4L2Format>& supportedFormats,
+            const ExternalCameraConfig& cfg,
+            const std::vector<SupportedV4L2Format>& sortedFormats,
+            const CroppingType& croppingType,
             const common::V1_0::helper::CameraMetadata& chars,
+            const std::string& cameraId,
             unique_fd v4l2Fd);
     virtual ~ExternalCameraDeviceSession();
     // Call by CameraDevice to dump active device states
@@ -176,11 +114,7 @@ protected:
     // Methods from ::android::hardware::camera::device::V3_2::ICameraDeviceSession follow
 
     Return<void> constructDefaultRequestSettings(
-            V3_2::RequestTemplate,
-            ICameraDeviceSession::constructDefaultRequestSettings_cb _hidl_cb);
-
-    Return<void> constructDefaultRequestSettings_3_4(
-            RequestTemplate type,
+            RequestTemplate,
             ICameraDeviceSession::constructDefaultRequestSettings_cb _hidl_cb);
 
     Return<void> configureStreams(
@@ -238,9 +172,6 @@ protected:
     Status constructDefaultRequestSettingsRaw(RequestTemplate type,
             V3_2::CameraMetadata *outMetadata);
 
-    static std::vector<SupportedV4L2Format> sortFormats(
-            const std::vector<SupportedV4L2Format>&);
-    static CroppingType initCroppingType(const std::vector<SupportedV4L2Format>&);
     bool initialize();
     Status initStatus() const;
     status_t initDefaultRequests();
@@ -250,7 +181,7 @@ protected:
     int v4l2StreamOffLocked();
 
     // TODO: change to unique_ptr for better tracking
-    sp<V4L2Frame> dequeueV4l2FrameLocked(); // Called with mLock hold
+    sp<V4L2Frame> dequeueV4l2FrameLocked(/*out*/nsecs_t* shutterTs); // Called with mLock hold
     void enqueueV4l2Frame(const sp<V4L2Frame>&);
 
     // Check if input Stream is one of supported stream setting on this device
@@ -268,8 +199,8 @@ protected:
 
     Status processOneCaptureRequest(const CaptureRequest& request);
 
-    Status processCaptureResult(HalRequest&);
-    Status processCaptureRequestError(HalRequest&);
+    Status processCaptureResult(std::shared_ptr<HalRequest>&);
+    Status processCaptureRequestError(const std::shared_ptr<HalRequest>&);
     void notifyShutter(uint32_t frameNumber, nsecs_t shutterTs);
     void notifyError(uint32_t frameNumber, int32_t streamId, ErrorCode ec);
     void invokeProcessCaptureResultCallback(
@@ -289,8 +220,9 @@ protected:
         Status allocateIntermediateBuffers(
                 const Size& v4lSize, const Size& thumbSize,
                 const hidl_vec<Stream>& streams);
-        Status submitRequest(const HalRequest&);
+        Status submitRequest(const std::shared_ptr<HalRequest>&);
         void flush();
+        void dump(int fd);
         virtual bool threadLoop() override;
 
     private:
@@ -302,9 +234,13 @@ protected:
         static int getCropRect(
                 CroppingType ct, const Size& inSize, const Size& outSize, IMapper::Rect* out);
 
-        static const int kReqWaitTimeoutSec = 3;
+        static const int kFlushWaitTimeoutSec = 3; // 3 sec
+        static const int kReqWaitTimeoutMs = 33;   // 33ms
+        static const int kReqWaitTimesMax = 90;    // 33ms * 90 ~= 3 sec
 
-        void waitForNextRequest(HalRequest* out);
+        void waitForNextRequest(std::shared_ptr<HalRequest>* out);
+        void signalRequestDone();
+
         int cropAndScaleLocked(
                 sp<AllocatedFrame>& in, const Size& outSize,
                 YCbCrLayout* out);
@@ -322,17 +258,24 @@ protected:
                 void *out, size_t maxOutSize,
                 size_t &actualCodeSize);
 
-        int createJpegLocked(HalStreamBuffer &halBuf, HalRequest &req);
+        int createJpegLocked(HalStreamBuffer &halBuf, const std::shared_ptr<HalRequest>& req);
 
-        mutable std::mutex mLock;
-        std::condition_variable mRequestCond;
-        wp<ExternalCameraDeviceSession> mParent;
-        CroppingType mCroppingType;
-        std::list<HalRequest> mRequestList;
+        const wp<ExternalCameraDeviceSession> mParent;
+        const CroppingType mCroppingType;
+
+        mutable std::mutex mRequestListLock;      // Protect acccess to mRequestList,
+                                                  // mProcessingRequest and mProcessingFrameNumer
+        std::condition_variable mRequestCond;     // signaled when a new request is submitted
+        std::condition_variable mRequestDoneCond; // signaled when a request is done processing
+        std::list<std::shared_ptr<HalRequest>> mRequestList;
+        bool mProcessingRequest = false;
+        uint32_t mProcessingFrameNumer = 0;
+
         // V4L2 frameIn
         // (MJPG decode)-> mYu12Frame
         // (Scale)-> mScaledYu12Frames
         // (Format convert) -> output gralloc frames
+        mutable std::mutex mBufferLock; // Protect access to intermediate buffers
         sp<AllocatedFrame> mYu12Frame;
         sp<AllocatedFrame> mYu12ThumbFrame;
         std::unordered_map<Size, sp<AllocatedFrame>, SizeHasher> mIntermediateBuffers;
@@ -346,8 +289,13 @@ protected:
 
     mutable Mutex mLock; // Protect all private members except otherwise noted
     const sp<ICameraDeviceCallback> mCallback;
+    const ExternalCameraConfig& mCfg;
     const common::V1_0::helper::CameraMetadata mCameraCharacteristics;
+    const std::vector<SupportedV4L2Format> mSupportedFormats;
+    const CroppingType mCroppingType;
+    const std::string& mCameraId;
     unique_fd mV4l2Fd;
+
     // device is closed either
     //    - closed by user
     //    - init failed
@@ -359,15 +307,14 @@ protected:
 
     bool mV4l2Streaming = false;
     SupportedV4L2Format mV4l2StreamingFmt;
-    std::vector<unique_fd> mV4l2Buffers;
+    size_t mV4L2BufferCount = 0;
 
     static const int kBufferWaitTimeoutSec = 3; // TODO: handle long exposure (or not allowing)
     std::mutex mV4l2BufferLock; // protect the buffer count and condition below
     std::condition_variable mV4L2BufferReturned;
     size_t mNumDequeuedV4l2Buffers = 0;
 
-    const std::vector<SupportedV4L2Format> mSupportedFormats;
-    const CroppingType mCroppingType;
+    // Not protected by mLock (but might be used when mLock is locked)
     sp<OutputThread> mOutputThread;
 
     // Stream ID -> Camera3Stream cache
@@ -409,7 +356,7 @@ private:
                 mParent(parent) {}
 
         virtual Return<void> constructDefaultRequestSettings(
-                V3_2::RequestTemplate type,
+                RequestTemplate type,
                 V3_3::ICameraDeviceSession::constructDefaultRequestSettings_cb _hidl_cb) override {
             return mParent->constructDefaultRequestSettings(type, _hidl_cb);
         }
@@ -442,12 +389,6 @@ private:
 
         virtual Return<void> close() override {
             return mParent->close();
-        }
-
-        virtual Return<void> constructDefaultRequestSettings_3_4(
-                RequestTemplate type,
-                ICameraDeviceSession::constructDefaultRequestSettings_cb _hidl_cb) override {
-            return mParent->constructDefaultRequestSettings_3_4(type, _hidl_cb);
         }
 
         virtual Return<void> configureStreams_3_3(

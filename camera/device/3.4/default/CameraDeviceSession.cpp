@@ -56,14 +56,6 @@ CameraDeviceSession::CameraDeviceSession(
 CameraDeviceSession::~CameraDeviceSession() {
 }
 
-Return<void> CameraDeviceSession::constructDefaultRequestSettings_3_4(
-        RequestTemplate type, ICameraDeviceSession::constructDefaultRequestSettings_cb _hidl_cb)  {
-    V3_2::CameraMetadata outMetadata;
-    Status status = constructDefaultRequestSettingsRaw( (int) type, &outMetadata);
-    _hidl_cb(status, outMetadata);
-    return Void();
-}
-
 Return<void> CameraDeviceSession::configureStreams_3_4(
         const StreamConfiguration& requestedConfiguration,
         ICameraDeviceSession::configureStreams_3_4_cb _hidl_cb)  {
@@ -378,7 +370,7 @@ Status CameraDeviceSession::processOneCaptureRequest_3_4(const V3_4::CaptureRequ
 
         for (size_t i = 0; i < settingsCount; i++) {
             uint64_t settingsSize = request.physicalCameraSettings[i].fmqSettingsSize;
-            const camera_metadata_t *settings;
+            const camera_metadata_t *settings = nullptr;
             if (settingsSize > 0) {
                 physicalFmq.push_back(V3_2::CameraMetadata(settingsSize));
                 bool read = mRequestMetadataQueue->read(physicalFmq[i].data(), settingsSize);
@@ -400,6 +392,13 @@ Status CameraDeviceSession::processOneCaptureRequest_3_4(const V3_4::CaptureRequ
                 ALOGE("%s: physical camera settings metadata is corrupt!", __FUNCTION__);
                 return Status::ILLEGAL_ARGUMENT;
             }
+
+            if (mFirstRequest && settings == nullptr) {
+                ALOGE("%s: Individual request settings must not be null for first request!",
+                        __FUNCTION__);
+                return Status::ILLEGAL_ARGUMENT;
+            }
+
             physicalCameraIds.push_back(request.physicalCameraSettings[i].physicalCameraId.c_str());
         }
     }
