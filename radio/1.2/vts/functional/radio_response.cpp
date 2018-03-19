@@ -21,11 +21,8 @@ CardStatus cardStatus;
 RadioResponse_v1_2::RadioResponse_v1_2(RadioHidlTest_v1_2& parent) : parent_v1_2(parent) {}
 
 /* 1.0 Apis */
-Return<void> RadioResponse_v1_2::getIccCardStatusResponse(const RadioResponseInfo& info,
-                                                          const CardStatus& card_status) {
-    rspInfo = info;
-    cardStatus = card_status;
-    parent_v1_2.notify();
+Return<void> RadioResponse_v1_2::getIccCardStatusResponse(const RadioResponseInfo& /*info*/,
+                                                          const CardStatus& /*card_status*/) {
     return Void();
 }
 
@@ -150,8 +147,10 @@ Return<void> RadioResponse_v1_2::sendSMSExpectMoreResponse(const RadioResponseIn
     return Void();
 }
 
-Return<void> RadioResponse_v1_2::setupDataCallResponse(const RadioResponseInfo& /*info*/,
+Return<void> RadioResponse_v1_2::setupDataCallResponse(const RadioResponseInfo& info,
                                                        const SetupDataCallResult& /*dcResponse*/) {
+    rspInfo = info;
+    parent_v1_2.notify();
     return Void();
 }
 
@@ -205,7 +204,9 @@ Return<void> RadioResponse_v1_2::acceptCallResponse(const RadioResponseInfo& /*i
     return Void();
 }
 
-Return<void> RadioResponse_v1_2::deactivateDataCallResponse(const RadioResponseInfo& /*info*/) {
+Return<void> RadioResponse_v1_2::deactivateDataCallResponse(const RadioResponseInfo& info) {
+    rspInfo = info;
+    parent_v1_2.notify();
     return Void();
 }
 
@@ -657,6 +658,7 @@ Return<void> RadioResponse_v1_2::acknowledgeRequest(int32_t /*serial*/) {
     return Void();
 }
 
+/* 1.1 Apis */
 Return<void> RadioResponse_v1_2::setCarrierInfoForImsiEncryptionResponse(
     const RadioResponseInfo& /*info*/) {
     return Void();
@@ -684,5 +686,49 @@ Return<void> RadioResponse_v1_2::startKeepaliveResponse(const RadioResponseInfo&
 }
 
 Return<void> RadioResponse_v1_2::stopKeepaliveResponse(const RadioResponseInfo& /*info*/) {
+    return Void();
+}
+
+/* 1.2 Apis */
+Return<void> RadioResponse_v1_2::setSignalStrengthReportingCriteriaResponse(
+    const RadioResponseInfo& info) {
+    rspInfo = info;
+    parent_v1_2.notify();
+    return Void();
+}
+
+Return<void> RadioResponse_v1_2::setLinkCapacityReportingCriteriaResponse(
+    const RadioResponseInfo& info) {
+    rspInfo = info;
+    parent_v1_2.notify();
+    return Void();
+}
+
+Return<void> RadioResponse_v1_2::getIccCardStatusResponse_1_2(const RadioResponseInfo& info,
+                                                              const CardStatus& card_status) {
+    rspInfo = info;
+    cardStatus = card_status;
+    parent_v1_2.notify();
+    return Void();
+}
+
+Return<void> RadioResponse_v1_2::getCurrentCallsResponse_1_2(
+    const RadioResponseInfo& info, const ::android::hardware::hidl_vec<Call>& /*calls*/) {
+    rspInfo = info;
+    parent_v1_2.notify();
+    return Void();
+}
+
+Return<void> RadioResponse_v1_2::getSignalStrengthResponse_1_2(
+    const RadioResponseInfo& info, const SignalStrength& /*sig_strength*/) {
+    rspInfo = info;
+    parent_v1_2.notify();
+    return Void();
+}
+
+Return<void> RadioResponse_v1_2::getCellInfoListResponse_1_2(
+    const RadioResponseInfo& info, const ::android::hardware::hidl_vec<CellInfo>& /*cellInfo*/) {
+    rspInfo = info;
+    parent_v1_2.notify();
     return Void();
 }

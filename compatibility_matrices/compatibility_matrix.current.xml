@@ -1,7 +1,7 @@
 <compatibility-matrix version="1.0" type="framework" level="3">
     <hal format="hidl" optional="false">
         <name>android.hardware.audio</name>
-        <version>2.0</version>
+        <version>4.0</version>
         <interface>
             <name>IDevicesFactory</name>
             <instance>default</instance>
@@ -9,7 +9,7 @@
     </hal>
     <hal format="hidl" optional="false">
         <name>android.hardware.audio.effect</name>
-        <version>2.0</version>
+        <version>4.0</version>
         <interface>
             <name>IEffectsFactory</name>
             <instance>default</instance>
@@ -178,9 +178,11 @@
     <hal format="hidl" optional="false">
         <name>android.hardware.keymaster</name>
         <version>3.0</version>
+        <version>4.0</version>
         <interface>
             <name>IKeymasterDevice</name>
             <instance>default</instance>
+	    <!-- TODO: strongbox here? -->
         </interface>
     </hal>
     <hal format="hidl" optional="true">
