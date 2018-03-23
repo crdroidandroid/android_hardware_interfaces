@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#define LOG_TAG "GnssHalTestCases"
+
 #include <gnss_hal_test.h>
 
 #include <VtsHalHidlTargetTestBase.h>
@@ -35,34 +37,6 @@ using android::hardware::gnss::V1_1::IGnssMeasurement;
  * Empty test fixture to verify basic Setup & Teardown
  */
 TEST_F(GnssHalTest, SetupTeardownCreateCleanup) {}
-
-/*
- * SetCallbackResponses:
- * Sets up the callback, awaits the capability, info & name
- */
-TEST_F(GnssHalTest, SetCallbackResponses) {
-    gnss_cb_ = new GnssCallback(*this);
-    ASSERT_NE(gnss_cb_, nullptr);
-
-    auto result = gnss_hal_->setCallback_1_1(gnss_cb_);
-    if (!result.isOk()) {
-        ALOGE("result of failed setCallback %s", result.description().c_str());
-    }
-
-    ASSERT_TRUE(result.isOk());
-    ASSERT_TRUE(result);
-
-    /*
-     * All capabilities, name and systemInfo callbacks should trigger
-     */
-    EXPECT_EQ(std::cv_status::no_timeout, wait(TIMEOUT_SEC));
-    EXPECT_EQ(std::cv_status::no_timeout, wait(TIMEOUT_SEC));
-    EXPECT_EQ(std::cv_status::no_timeout, wait(TIMEOUT_SEC));
-
-    EXPECT_EQ(capabilities_called_count_, 1);
-    EXPECT_EQ(info_called_count_, 1);
-    EXPECT_EQ(name_called_count_, 1);
-}
 
 /*
  * TestGnssMeasurementCallback:
@@ -281,6 +255,7 @@ TEST_F(GnssHalTest, BlacklistIndividualSatellites) {
         if (strongest_sv_is_reobserved) break;
     }
     EXPECT_TRUE(strongest_sv_is_reobserved);
+    StopAndClearLocations();
 }
 
 /*
