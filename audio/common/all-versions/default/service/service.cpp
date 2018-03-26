@@ -26,8 +26,10 @@
 #include <binder/ProcessState.h>
 #include <hidl/HidlTransportSupport.h>
 #include <hidl/LegacySupport.h>
+#include <com/qualcomm/qti/bluetooth_audio/1.0/IBluetoothAudio.h>
 
 using namespace android::hardware;
+using com::qualcomm::qti::bluetooth_audio::V1_0::IBluetoothAudio;
 using android::OK;
 
 int main(int /* argc */, char* /* argv */ []) {
@@ -52,6 +54,9 @@ int main(int /* argc */, char* /* argv */ []) {
         registerPassthroughServiceImplementation<bluetooth::a2dp::V1_0::IBluetoothAudioOffload>() !=
         OK;
     ALOGW_IF(fail, "Could not register Bluetooth audio offload 1.0");
+
+    fail = registerPassthroughServiceImplementation<IBluetoothAudio>()!= OK;
+    ALOGW_IF(fail, "Could not register bluetooth_audio service");
 
     joinRpcThreadpool();
 }
