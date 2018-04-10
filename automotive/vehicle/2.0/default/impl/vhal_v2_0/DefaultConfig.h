@@ -30,7 +30,8 @@ namespace impl {
 //
 // Some handy constants to avoid conversions from enum to int.
 constexpr int ABS_ACTIVE = (int)VehicleProperty::ABS_ACTIVE;
-constexpr int AP_POWER_STATE = (int)VehicleProperty::AP_POWER_STATE;
+constexpr int AP_POWER_STATE_REQ = (int)VehicleProperty::AP_POWER_STATE_REQ;
+constexpr int AP_POWER_STATE_REPORT = (int)VehicleProperty::AP_POWER_STATE_REPORT;
 constexpr int OBD2_LIVE_FRAME = (int)VehicleProperty::OBD2_LIVE_FRAME;
 constexpr int OBD2_FREEZE_FRAME = (int)VehicleProperty::OBD2_FREEZE_FRAME;
 constexpr int OBD2_FREEZE_FRAME_INFO = (int)VehicleProperty::OBD2_FREEZE_FRAME_INFO;
@@ -46,17 +47,34 @@ constexpr int ALL_WHEELS =
  *
  * It has the following format:
  *
- * int32Values[0] - command (1 - start fake data generation, 0 - stop)
+ * int32Values[0] - command (see FakeDataCommand below for possible values)
  * int32Values[1] - VehicleProperty to which command applies
- *
- * For start command, additional data should be provided:
- *   int64Values[0] - periodic interval in nanoseconds
- *   floatValues[0] - initial value
- *   floatValues[1] - dispersion defines min and max range relative to initial value
- *   floatValues[2] - increment, with every timer tick the value will be incremented by this amount
  */
 const int32_t kGenerateFakeDataControllingProperty =
     0x0666 | VehiclePropertyGroup::VENDOR | VehicleArea::GLOBAL | VehiclePropertyType::MIXED;
+
+enum class FakeDataCommand : int32_t {
+    /** Stops generating of fake data that was triggered by Start command */
+    Stop = 0,
+
+    /**
+     * Starts fake data generation.  Caller must provide additional data:
+     *     int64Values[0] - periodic interval in nanoseconds
+     *     floatValues[0] - initial value
+     *     floatValues[1] - dispersion defines min and max range relative to initial value
+     *     floatValues[2] - increment, with every timer tick the value will be incremented by this
+     * amount
+     */
+    Start = 1,
+
+    /**
+     * Injects key press event (HAL incorporates UP/DOWN acction and triggers 2 HAL events for every
+     * key-press). Caller must provide the following data: int32Values[2] - Android key code
+     *     int32Values[3] - target display (0 - for main display, 1 - for instrument cluster, see
+     * VehicleDisplay)
+     */
+    KeyPress = 2,
+};
 
 const int32_t kHvacPowerProperties[] = {
     toInt(VehicleProperty::HVAC_FAN_SPEED),
@@ -131,14 +149,6 @@ const ConfigDeclaration kVehicleProperties[]{
              .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
          },
      .initialValue = {.floatValues = {0.0f}}},
-
-    {.config =
-         {
-             .prop = toInt(VehicleProperty::ENGINE_ON),
-             .access = VehiclePropertyAccess::READ,
-             .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
-         },
-     .initialValue = {.int32Values = {0}}},
 
     {
         .config =
@@ -238,7 +248,7 @@ const ConfigDeclaration kVehicleProperties[]{
              .access = VehiclePropertyAccess::READ_WRITE,
              .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
              .areaConfigs = {VehicleAreaConfig{
-                 .areaId = (VehicleAreaZone::ROW_1_LEFT | VehicleAreaZone::ROW_1_RIGHT)}},
+                 .areaId = (VehicleAreaSeat::ROW_1_LEFT | VehicleAreaSeat::ROW_1_RIGHT)}},
              // TODO(bryaneyler): Ideally, this is generated dynamically from
              // kHvacPowerProperties.
              .configString = "0x12400500,0x12400501"  // HVAC_FAN_SPEED,HVAC_FAN_DIRECTION
@@ -259,28 +269,28 @@ const ConfigDeclaration kVehicleProperties[]{
                 .access = VehiclePropertyAccess::READ_WRITE,
                 .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
                 .areaConfigs = {VehicleAreaConfig{
-                    .areaId = (VehicleAreaZone::ROW_1_LEFT | VehicleAreaZone::ROW_1_RIGHT)}}},
+                    .areaId = (VehicleAreaSeat::ROW_1_LEFT | VehicleAreaSeat::ROW_1_RIGHT)}}},
      .initialValue = {.int32Values = {1}}},
 
     {.config = {.prop = toInt(VehicleProperty::HVAC_AC_ON),
                 .access = VehiclePropertyAccess::READ_WRITE,
                 .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
                 .areaConfigs = {VehicleAreaConfig{
-                    .areaId = (VehicleAreaZone::ROW_1_LEFT | VehicleAreaZone::ROW_1_RIGHT)}}},
+                    .areaId = (VehicleAreaSeat::ROW_1_LEFT | VehicleAreaSeat::ROW_1_RIGHT)}}},
      .initialValue = {.int32Values = {1}}},
 
     {.config = {.prop = toInt(VehicleProperty::HVAC_AUTO_ON),
                 .access = VehiclePropertyAccess::READ_WRITE,
                 .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
                 .areaConfigs = {VehicleAreaConfig{
-                    .areaId = (VehicleAreaZone::ROW_1_LEFT | VehicleAreaZone::ROW_1_RIGHT)}}},
+                    .areaId = (VehicleAreaSeat::ROW_1_LEFT | VehicleAreaSeat::ROW_1_RIGHT)}}},
      .initialValue = {.int32Values = {1}}},
 
     {.config = {.prop = toInt(VehicleProperty::HVAC_FAN_SPEED),
                 .access = VehiclePropertyAccess::READ_WRITE,
                 .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
                 .areaConfigs = {VehicleAreaConfig{
-                    .areaId = (VehicleAreaZone::ROW_1_LEFT | VehicleAreaZone::ROW_1_RIGHT),
+                    .areaId = (VehicleAreaSeat::ROW_1_LEFT | VehicleAreaSeat::ROW_1_RIGHT),
                     .minInt32Value = 1,
                     .maxInt32Value = 7}}},
      .initialValue = {.int32Values = {3}}},
@@ -289,24 +299,24 @@ const ConfigDeclaration kVehicleProperties[]{
                 .access = VehiclePropertyAccess::READ_WRITE,
                 .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
                 .areaConfigs = {VehicleAreaConfig{
-                    .areaId = (VehicleAreaZone::ROW_1_LEFT | VehicleAreaZone::ROW_1_RIGHT)}}},
+                    .areaId = (VehicleAreaSeat::ROW_1_LEFT | VehicleAreaSeat::ROW_1_RIGHT)}}},
      .initialValue = {.int32Values = {toInt(VehicleHvacFanDirection::FACE)}}},
 
     {.config = {.prop = toInt(VehicleProperty::HVAC_TEMPERATURE_SET),
                 .access = VehiclePropertyAccess::READ_WRITE,
                 .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
                 .areaConfigs = {VehicleAreaConfig{
-                                    .areaId = toInt(VehicleAreaZone::ROW_1_LEFT),
+                                    .areaId = toInt(VehicleAreaSeat::ROW_1_LEFT),
                                     .minFloatValue = 16,
                                     .maxFloatValue = 32,
                                 },
                                 VehicleAreaConfig{
-                                    .areaId = toInt(VehicleAreaZone::ROW_1_RIGHT),
+                                    .areaId = toInt(VehicleAreaSeat::ROW_1_RIGHT),
                                     .minFloatValue = 16,
                                     .maxFloatValue = 32,
                                 }}},
-     .initialAreaValues = {{toInt(VehicleAreaZone::ROW_1_LEFT), {.floatValues = {16}}},
-                           {toInt(VehicleAreaZone::ROW_1_RIGHT), {.floatValues = {20}}}}},
+     .initialAreaValues = {{toInt(VehicleAreaSeat::ROW_1_LEFT), {.floatValues = {16}}},
+                           {toInt(VehicleAreaSeat::ROW_1_RIGHT), {.floatValues = {20}}}}},
 
     {.config =
          {
@@ -326,14 +336,6 @@ const ConfigDeclaration kVehicleProperties[]{
              .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
          },
      .initialValue = {.int32Values = {0}}},
-
-    {.config =
-         {
-             .prop = toInt(VehicleProperty::DRIVING_STATUS),
-             .access = VehiclePropertyAccess::READ,
-             .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
-         },
-     .initialValue = {.int32Values = {toInt(VehicleDrivingStatus::UNRESTRICTED)}}},
 
     {.config =
          {
@@ -415,11 +417,17 @@ const ConfigDeclaration kVehicleProperties[]{
             },
     },
 
-    {.config = {.prop = toInt(VehicleProperty::AP_POWER_STATE),
-                .access = VehiclePropertyAccess::READ_WRITE,
+    {.config = {.prop = toInt(VehicleProperty::AP_POWER_STATE_REQ),
+                .access = VehiclePropertyAccess::READ,
                 .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
                 .configArray = {3}},
-     .initialValue = {.int32Values = {toInt(VehicleApPowerState::ON_FULL), 0}}},
+     .initialValue = {.int32Values = {toInt(VehicleApPowerStateReq::ON_FULL), 0}}},
+
+    {.config = {.prop = toInt(VehicleProperty::AP_POWER_STATE_REPORT),
+                .access = VehiclePropertyAccess::WRITE,
+                .changeMode = VehiclePropertyChangeMode::ON_CHANGE,
+                .configArray = {3}},
+     .initialValue = {.int32Values = {toInt(VehicleApPowerStateReport::BOOT_COMPLETE), 0}}},
 
     {.config = {.prop = toInt(VehicleProperty::DISPLAY_BRIGHTNESS),
                 .access = VehiclePropertyAccess::READ_WRITE,
