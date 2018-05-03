@@ -4,6 +4,7 @@ service vendor.hwcomposer-2-1 /vendor/bin/hw/android.hardware.graphics.composer@
     group graphics drmrpc
     capabilities SYS_NICE
     writepid /dev/cpuset/system-background/tasks
+    socket pps stream 0660 system system
 
 # Restart HWC when SurfaceFlinger stops. This turns off the display and prpares
 # a new HWC instance for when SurfaceFlinger gets started again
