@@ -46,7 +46,7 @@ LOCAL_SHARED_LIBRARIES := \
     android.hardware.bluetooth.a2dp@1.0 \
     android.hardware.soundtrigger@2.0 \
     android.hardware.soundtrigger@2.1 \
-    com.qualcomm.qti.bluetooth_audio@1.0_vendor
+    com.qualcomm.qti.bluetooth_audio@1.0
 
 # Can not switch to Android.bp until AUDIOSERVER_MULTILIB
 # is deprecated as build config variable are not supported
