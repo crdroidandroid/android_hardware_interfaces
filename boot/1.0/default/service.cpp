@@ -22,5 +22,6 @@ using ::android::hardware::boot::V1_0::IBootControl;
 using android::hardware::defaultPassthroughServiceImplementation;
 
 int main (int /* argc */, char * /* argv */ []) {
+    android::hardware::ProcessState::initWithMmapSize((size_t)8192);
     return defaultPassthroughServiceImplementation<IBootControl>();
 }
