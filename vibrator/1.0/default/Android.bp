@@ -44,5 +44,6 @@ cc_binary {
         "libutils",
         "libhardware",
         "android.hardware.vibrator@1.0",
+        "libhwbinder",
     ],
 }

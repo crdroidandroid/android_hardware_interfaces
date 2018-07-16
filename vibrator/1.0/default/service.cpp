@@ -22,5 +22,6 @@ using android::hardware::vibrator::V1_0::IVibrator;
 using android::hardware::defaultPassthroughServiceImplementation;
 
 int main() {
+    android::hardware::ProcessState::initWithMmapSize((size_t)8192);
     return defaultPassthroughServiceImplementation<IVibrator>();
 }
