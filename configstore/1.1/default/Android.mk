@@ -22,6 +22,7 @@ LOCAL_SHARED_LIBRARIES := \
     libhwminijail \
     liblog \
     libutils \
+    libcutils\
     android.hardware.configstore@1.0 \
     android.hardware.configstore@1.1
 

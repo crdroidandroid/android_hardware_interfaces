@@ -17,7 +17,9 @@
 #include "SurfaceFlingerConfigs.h"
 
 #include <android/hardware/configstore/1.1/types.h>
+#include <cutils/properties.h>
 #include <log/log.h>
+#include <string>
 
 namespace android {
 namespace hardware {
@@ -74,11 +76,9 @@ Return<void> SurfaceFlingerConfigs::hasWideColorDisplay(hasWideColorDisplay_cb _
 }
 
 Return<void> SurfaceFlingerConfigs::hasSyncFramework(hasSyncFramework_cb _hidl_cb) {
-    bool value = true;
-#ifdef RUNNING_WITHOUT_SYNC_FRAMEWORK
-    value = false;
-#endif
-    _hidl_cb({true, value});
+    char value[PROPERTY_VALUE_MAX] = {};
+    property_get("debug.sf.has_sync_framework", value, "true");
+    _hidl_cb({true, std::string(value) == "true"});
     return Void();
 }
 
