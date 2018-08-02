@@ -57,7 +57,7 @@ using std::list;
 using ::android::sp;
 using ::android::hardware::Return;
 using ::android::hardware::hidl_bitfield;
-using ::android::hardware::hidl_enum_iterator;
+using ::android::hardware::hidl_enum_range;
 using ::android::hardware::hidl_handle;
 using ::android::hardware::hidl_string;
 using ::android::hardware::hidl_vec;
@@ -106,7 +106,10 @@ using namespace ::android::hardware::audio::common::test::utility;
 static auto okOrNotSupported = {Result::OK, Result::NOT_SUPPORTED};
 static auto okOrNotSupportedOrInvalidArgs = {Result::OK, Result::NOT_SUPPORTED,
                                              Result::INVALID_ARGUMENTS};
+static auto okOrInvalidStateOrNotSupported = {Result::OK, Result::INVALID_STATE,
+                                              Result::NOT_SUPPORTED};
 static auto invalidArgsOrNotSupported = {Result::INVALID_ARGUMENTS, Result::NOT_SUPPORTED};
+static auto invalidStateOrNotSupported = {Result::INVALID_STATE, Result::NOT_SUPPORTED};
 
 class AudioHidlTestEnvironment : public ::Environment {
    public:
@@ -555,11 +558,11 @@ TEST_F(AudioPrimaryHidlTest, SetConnectedState) {
             address.device = deviceType;
             auto ret = device->setConnectedState(address, state);
             ASSERT_TRUE(ret.isOk());
-            if (res == Result::NOT_SUPPORTED) {
+            if (ret == Result::NOT_SUPPORTED) {
                 doc::partialTest("setConnectedState is not supported");
                 return;
             }
-            ASSERT_OK(res);
+            ASSERT_OK(ret);
         }
     }
 }
@@ -949,8 +952,6 @@ TEST_IO_STREAM(RemoveNonExistingEffect, "Removing a non existing effect should f
 TEST_IO_STREAM(standby, "Make sure the stream can be put in stanby",
                ASSERT_OK(stream->standby()))  // can not fail
 
-static constexpr auto invalidStateOrNotSupported = {Result::INVALID_STATE, Result::NOT_SUPPORTED};
-
 TEST_IO_STREAM(startNoMmap, "Starting a mmaped stream before mapping it should fail",
                ASSERT_RESULT(invalidStateOrNotSupported, stream->start()))
 
@@ -1070,17 +1071,21 @@ TEST_P(InputStreamTest, GetInputFramesLost) {
 TEST_P(InputStreamTest, getCapturePosition) {
     doc::test(
         "The capture position of a non prepared stream should not be "
-        "retrievable");
+        "retrievable or 0");
     uint64_t frames;
     uint64_t time;
     ASSERT_OK(stream->getCapturePosition(returnIn(res, frames, time)));
-    ASSERT_RESULT(invalidStateOrNotSupported, res);
+    ASSERT_RESULT(okOrInvalidStateOrNotSupported, res);
+    if (res == Result::OK) {
+        ASSERT_EQ(0U, frames);
+        ASSERT_LE(0U, time);
+    }
 }
 
 TEST_P(InputStreamTest, updateSinkMetadata) {
     doc::test("The HAL should not crash on metadata change");
 
-    hidl_enum_iterator<AudioSource> range;
+    hidl_enum_range<AudioSource> range;
     // Test all possible track configuration
     for (AudioSource source : range) {
         for (float volume : {0.0, 0.5, 1.0}) {
@@ -1100,11 +1105,10 @@ TEST_P(InputStreamTest, updateSinkMetadata) {
 }
 
 TEST_P(InputStreamTest, getActiveMicrophones) {
-    doc::test("Getting active microphones should always succeed");
+    doc::test("Active microphones of a non started stream may not be retrievable");
     hidl_vec<MicrophoneInfo> microphones;
-    ASSERT_OK(device->getMicrophones(returnIn(res, microphones)));
-    ASSERT_OK(res);
-    ASSERT_TRUE(microphones.size() > 0);
+    ASSERT_OK(stream->getActiveMicrophones(returnIn(res, microphones)));
+    ASSERT_RESULT(okOrNotSupported, res);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -1332,8 +1336,8 @@ TEST_P(OutputStreamTest, SelectPresentation) {
 TEST_P(OutputStreamTest, updateSourceMetadata) {
     doc::test("The HAL should not crash on metadata change");
 
-    hidl_enum_iterator<AudioUsage> usageRange;
-    hidl_enum_iterator<AudioContentType> contentRange;
+    hidl_enum_range<AudioUsage> usageRange;
+    hidl_enum_range<AudioContentType> contentRange;
     // Test all possible track configuration
     for (auto usage : usageRange) {
         for (auto content : contentRange) {
