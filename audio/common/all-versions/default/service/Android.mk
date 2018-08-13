@@ -46,7 +46,9 @@ LOCAL_SHARED_LIBRARIES := \
     android.hardware.bluetooth.a2dp@1.0 \
     android.hardware.soundtrigger@2.0 \
     android.hardware.soundtrigger@2.1 \
-    com.qualcomm.qti.bluetooth_audio@1.0
+    com.qualcomm.qti.bluetooth_audio@1.0 \
+    libhwbinder \
+    libcutils
 
 # Can not switch to Android.bp until AUDIOSERVER_MULTILIB
 # is deprecated as build config variable are not supported
@@ -54,6 +56,10 @@ ifeq ($(strip $(AUDIOSERVER_MULTILIB)),)
 LOCAL_MULTILIB := 32
 else
 LOCAL_MULTILIB := $(AUDIOSERVER_MULTILIB)
+endif
+
+ifeq ($(TARGET_ARCH),arm)
+    LOCAL_CFLAGS += -DARCH_ARM_32
 endif
 
 include $(BUILD_EXECUTABLE)
