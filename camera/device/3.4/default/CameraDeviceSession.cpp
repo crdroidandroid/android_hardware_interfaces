@@ -196,12 +196,12 @@ bool CameraDeviceSession::preProcessConfigurationLocked_3_4(
             mStreamMap[id].physical_camera_id = mPhysicalCameraIdMap[id].c_str();
             mCirculatingBuffers.emplace(stream.mId, CirculatingBuffers{});
         } else {
-            // width/height/format must not change, but usage/rotation might need to change
+            // width/height must not change, but usage/rotation might need to change
+            // format might change and get updated with overrideFormat
             if (mStreamMap[id].stream_type !=
                     (int) requestedConfiguration.streams[i].v3_2.streamType ||
                     mStreamMap[id].width != requestedConfiguration.streams[i].v3_2.width ||
                     mStreamMap[id].height != requestedConfiguration.streams[i].v3_2.height ||
-                    mStreamMap[id].format != (int) requestedConfiguration.streams[i].v3_2.format ||
                     mStreamMap[id].data_space !=
                             mapToLegacyDataspace( static_cast<android_dataspace_t> (
                                     requestedConfiguration.streams[i].v3_2.dataSpace)) ||
