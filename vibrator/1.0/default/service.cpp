@@ -17,6 +17,7 @@
 
 #include <android/hardware/vibrator/1.0/IVibrator.h>
 #include <hidl/LegacySupport.h>
+#include <hwbinder/ProcessState.h>
 
 using android::hardware::vibrator::V1_0::IVibrator;
 using android::hardware::defaultPassthroughServiceImplementation;
