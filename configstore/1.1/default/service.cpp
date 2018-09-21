@@ -33,13 +33,14 @@ using android::status_t;
 using android::OK;
 
 int main() {
-    configureRpcThreadpool(10, true);
-
-    SetupMinijail("/vendor/etc/seccomp_policy/configstore@1.1.policy");
 
 #ifdef ARCH_ARM_32
     android::hardware::ProcessState::initWithMmapSize((size_t)(32768));
 #endif
+
+    configureRpcThreadpool(10, true);
+
+    SetupMinijail("/vendor/etc/seccomp_policy/configstore@1.1.policy");
 
     sp<ISurfaceFlingerConfigs> surfaceFlingerConfigs = new SurfaceFlingerConfigs;
     status_t status = surfaceFlingerConfigs->registerAsService();
