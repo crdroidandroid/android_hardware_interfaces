@@ -105,7 +105,7 @@
     </hal>
     <hal format="hidl" optional="false">
         <name>android.hardware.configstore</name>
-        <version>1.1</version>
+        <version>1.2</version>
         <interface>
             <name>ISurfaceFlingerConfigs</name>
             <instance>default</instance>
@@ -208,8 +208,20 @@
         </interface>
     </hal>
     <hal format="hidl" optional="true">
+        <name>android.hardware.health.filesystem</name>
+        <version>1.0</version>
+        <interface>
+            <name>IFileSystem</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+    <hal format="hidl" optional="true">
         <name>android.hardware.ir</name>
         <version>1.0</version>
+        <interface>
+            <name>IConsumerIr</name>
+            <instance>default</instance>
+        </interface>
     </hal>
     <hal format="hidl" optional="false">
         <name>android.hardware.keymaster</name>
@@ -425,7 +437,7 @@
     </hal>
     <hal format="hidl" optional="true">
         <name>android.hardware.wifi</name>
-        <version>1.0-2</version>
+        <version>1.0-3</version>
         <interface>
             <name>IWifi</name>
             <instance>default</instance>

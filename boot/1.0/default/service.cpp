@@ -17,6 +17,7 @@
 
 #include <android/hardware/boot/1.0/IBootControl.h>
 #include <hidl/LegacySupport.h>
+#include <hwbinder/ProcessState.h>
 
 using ::android::hardware::boot::V1_0::IBootControl;
 using android::hardware::defaultPassthroughServiceImplementation;
