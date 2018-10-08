@@ -29,6 +29,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <hwbinder/IPCThreadState.h>
+
 #include <VtsHalHidlTargetTestBase.h>
 
 #include <android-base/logging.h>
@@ -63,6 +65,7 @@ using ::android::hardware::hidl_enum_range;
 using ::android::hardware::hidl_handle;
 using ::android::hardware::hidl_string;
 using ::android::hardware::hidl_vec;
+using ::android::hardware::IPCThreadState;
 using ::android::hardware::kSynchronizedReadWrite;
 using ::android::hardware::MessageQueue;
 using ::android::hardware::MQDescriptorSync;
@@ -170,15 +173,25 @@ TEST_F(AudioHidlTest, OpenDeviceInvalidParameter) {
 
 TEST_F(AudioHidlTest, OpenPrimaryDeviceUsingGetDevice) {
     doc::test("Calling openDevice(\"primary\") should return the primary device.");
-    Result result;
-    sp<IDevice> baseDevice;
-    ASSERT_OK(devicesFactory->openDevice("primary", returnIn(result, baseDevice)));
-    ASSERT_OK(result);
-    ASSERT_TRUE(baseDevice != nullptr);
+    {
+        Result result;
+        sp<IDevice> baseDevice;
+        ASSERT_OK(devicesFactory->openDevice("primary", returnIn(result, baseDevice)));
+        ASSERT_OK(result);
+        ASSERT_TRUE(baseDevice != nullptr);
 
-    Return<sp<IPrimaryDevice>> primaryDevice = IPrimaryDevice::castFrom(baseDevice);
-    ASSERT_TRUE(primaryDevice.isOk());
-    ASSERT_TRUE(sp<IPrimaryDevice>(primaryDevice) != nullptr);
+        Return<sp<IPrimaryDevice>> primaryDevice = IPrimaryDevice::castFrom(baseDevice);
+        ASSERT_TRUE(primaryDevice.isOk());
+        ASSERT_TRUE(sp<IPrimaryDevice>(primaryDevice) != nullptr);
+    }  // Destroy local IDevice proxy
+    // FIXME: there is no way to know when the remote IDevice is being destroyed
+    //        Binder does not support testing if an object is alive, thus
+    //        wait for 100ms to let the binder destruction propagates and
+    //        the remote device has the time to be destroyed.
+    //        flushCommand makes sure all local command are sent, thus should reduce
+    //        the latency between local and remote destruction.
+    IPCThreadState::self()->flushCommands();
+    usleep(100);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -810,8 +823,8 @@ static R extract(Return<R> ret) {
         code;                                          \
     }
 
-TEST_IO_STREAM(GetFrameCount, "Check that the stream frame count == the one it was opened with",
-               ASSERT_EQ(audioConfig.frameCount, extract(stream->getFrameCount())))
+TEST_IO_STREAM(GetFrameCount, "Check that getting stream frame count does not crash the HAL.",
+               ASSERT_TRUE(stream->getFrameCount().isOk()))
 
 TEST_IO_STREAM(GetSampleRate, "Check that the stream sample rate == the one it was opened with",
                ASSERT_EQ(audioConfig.sampleRateHz, extract(stream->getSampleRate())))
@@ -1470,6 +1483,7 @@ TEST_F(AudioPrimaryHidlTest, setBtHfpVolume) {
         "Make sure setBtHfpVolume is either not supported or "
         "only succeed if volume is in [0,1]");
     auto ret = device->setBtHfpVolume(0.0);
+    ASSERT_TRUE(ret.isOk());
     if (ret == Result::NOT_SUPPORTED) {
         doc::partialTest("setBtHfpVolume is not supported");
         return;
