@@ -29,4 +29,44 @@ interface IFastboot {
      *     reformatting.
      */
     getPartitionType(string partitionName) generates (FileSystemType type, Result result);
+
+    /**
+     * Executes a fastboot OEM command.
+     *
+     * @param oemCmdArgs The oem command that is passed to the fastboot HAL.
+     * @return result Returns the status SUCCESS if the operation is successful,
+     *     INVALID_ARGUMENT for bad arguments,
+     *     FAILURE_UNKNOWN for an invalid/unsupported command.
+     */
+    doOemCommand(string oemCmd) generates (Result result);
+
+    /**
+     * Returns an OEM-defined string indicating the variant of the device, for
+     * example, US and ROW.
+     *
+     * @return variant Indicates the device variant.
+     * @return result Returns the status SUCCESS if the operation is successful,
+     *     FAILURE_UNKNOWN otherwise.
+     */
+    getVariant() generates (string variant, Result result);
+
+    /**
+     * Returns whether off-mode-charging is enabled. If enabled, the device
+     * autoboots into a special mode when power is applied.
+     *
+     * @return state Returns whether off mode charging is enabled.
+     * @return result Returns the status SUCCESS if the operation is successful,
+     *     FAILURE_UNKNOWN otherwise.
+     */
+    getOffModeChargeState() generates (bool state, Result result);
+
+    /**
+     * Returns the minimum battery voltage required for flashing in mV.
+     *
+     * @return batteryVoltage Minimum batterery voltage (in mV) required for
+     *     flashing to be successful.
+     * @return result Returns the status SUCCESS if the operation is successful,
+     *     FAILURE_UNKNOWN otherwise.
+     */
+    getBatteryVoltageFlashingThreshold() generates (int32_t batteryVoltage, Result result);
 };

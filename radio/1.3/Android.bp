@@ -20,8 +20,12 @@ hidl_interface {
     ],
     types: [
         "AccessNetwork",
+        "DataProfileInfo",
+        "DataRegStateResult",
         "EmergencyNumber",
+        "EmergencyNumberSource",
         "EmergencyServiceCategory",
+        "LteVopsInfo",
     ],
     gen_java: true,
 }

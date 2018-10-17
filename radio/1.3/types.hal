@@ -16,7 +16,15 @@
 
 package android.hardware.radio@1.3;
 
+import @1.0::ApnAuthType;
+import @1.0::ApnTypes;
+import @1.0::DataProfileId;
+import @1.0::DataProfileInfoType;
+import @1.0::RadioAccessFamily;
+import @1.0::RegState;
 import @1.2::AccessNetwork;
+import @1.2::CellIdentity;
+import @1.2::DataRegStateResult;
 
 enum AccessNetwork : @1.2::AccessNetwork {
     /**
@@ -26,14 +34,14 @@ enum AccessNetwork : @1.2::AccessNetwork {
 };
 
 /**
- * Emergency number contains information of number, one or more service category(s), and mobile
- * country code (mcc).
+ * Emergency number contains information of number, one or more service category(s), mobile country
+ * code (mcc), and source(s) that indicate where it comes from.
  *
  * If the source of the emergency number is associated with country, field ‘mcc’ must be
  * provided; otherwise the field ‘mcc’ must be an empty string.
  *
- * A unique EmergencyNumber has a unique combination of ‘number’ and ‘mcc’ fields.
- * Multiple @1.3::EmergencyServiceCategory should be merged into the bitfield for the same
+ * A unique EmergencyNumber has a unique combination of ‘number’, ‘mcc’ and 'categories' fields.
+ * Multiple @1.3::EmergencyNumberSource should be merged into the bitfield for the same
  * EmergencyNumber.
  *
  * Reference: 3GPP TS 22.101 version 9.1.0 Release 9
@@ -53,6 +61,11 @@ struct EmergencyNumber{
      * the value of each bit.
      */
     bitfield<EmergencyServiceCategory> categories;
+    /**
+     * The bitfield of @1.3::EmergencyNumberSource(s). See @1.3::EmergencyNumberSource for the
+     * value of each bit.
+     */
+    bitfield<EmergencyNumberSource> sources;
 };
 
 /**
@@ -66,18 +79,157 @@ struct EmergencyNumber{
  * - Manually Initiated eCall (MIeC);
  * - Automatically Initiated eCall (AIeC);
  *
- * Type GENERIC (General emergency call, all categories) is considered to use if the reported type
- * is not any of the other specific types.
+ * Category UNSPECIFIED (General emergency call, all categories) indicates that no specific
+ * services are associated with this emergency number.
  *
- * Reference: 3GPP TS 22.101 version 9.1.0 Release 9
+ * Reference: 3gpp 22.101, Section 10 - Emergency Calls
  */
 enum EmergencyServiceCategory : int32_t {
-    GENERIC = 0, // General emergency call, all categories
+    /**
+     * General emergency call, all categories
+     */
+    UNSPECIFIED = 0,
     POLICE = 1 << 0,
     AMBULANCE = 1 << 1,
     FIRE_BRIGADE = 1 << 2,
     MARINE_GUARD = 1 << 3,
     MOUNTAIN_RESCUE = 1 << 4,
-    MIEC = 1 << 5, // Manually Initiated eCall (MIeC)
-    AIEC = 1 << 6, // Automatically Initiated eCall (AIeC)
+    /**
+     * Manually Initiated eCall (MIeC)
+     */
+    MIEC = 1 << 5,
+    /**
+     * Automatically Initiated eCall (AIeC)
+     */
+    AIEC = 1 << 6,
+};
+
+/**
+ * The source to tell where the corresponding @1.3::EmergencyNumber comes from.
+ *
+ * Reference: 3gpp 22.101, Section 10 - Emergency Calls
+ */
+enum EmergencyNumberSource : int32_t {
+    /**
+     * Indicates the number is from the network signal.
+     */
+    NETWORK_SIGNALING = 1 << 0,
+    /**
+     * Indicates the number is from the sim card.
+     */
+    SIM = 1 << 1,
+    /**
+     * Indicates the number is from the modem config.
+     */
+    MODEM_CONFIG = 1 << 2,
+    /**
+     * Indicates the number is available as default. Per the reference, 112, 911 must always be
+     * available; additionally, 000, 08, 110, 999, 118 and 119 must be available when sim is not
+     * present.
+     */
+    DEFAULT = 1 << 3,
+};
+
+/**
+ * Type to define the LTE specific network capabilities for voice over PS including
+ * emergency and normal voice calls.
+ */
+struct LteVopsInfo {
+    /**
+     * This indicates if camped network support VoLTE services. This information is received
+     * from LTE network during LTE NAS registration procedure through LTE ATTACH ACCEPT/TAU
+     * ACCEPT. Refer 3GPP 24.301 EPS network feature support -> IMS VoPS
+     */
+    bool isVopsSupported;
+    /**
+     * This indicates if camped network support VoLTE emergency bearers. This information
+     * is received from LTE network through two sources:
+     * a. During LTE NAS registration procedure through LTE ATTACH ACCEPT/TAU ACCEPT. Refer
+     *    3GPP 24.301 EPS network feature support -> EMC BS
+     * b. In case device is not registered on network. Refer 3GPP 25.331 LTE RRC
+     *    SIB1 : ims-EmergencySupport-r9
+     * If device is registered on LTE, then this field indicates (a).
+     * In case of limited service on LTE this field indicates (b).
+     */
+    bool isEmcBearerSupported;
+};
+
+struct DataRegStateResult {
+    @1.2::DataRegStateResult base;
+    /**
+     * Network capabilities for voice over PS services. This info is valid only
+     * on LTE network and must be present when device is camped on LTE. vopsInfo
+     * will be empty when device is camped only on 2G/3G .
+     */
+    safe_union VopsInfo {
+        LteVopsInfo lteVopsInfo; // LTE network capability
+    } vopsInfo;
+};
+
+/**
+ * Overwritten from @1.0::DataProfileInfo in order to deprecate 'mvnoType', 'mvnoMatchData',
+ * 'maxConnsTime', and 'maxConns'. In the future, this must be extended instead of overwritten.
+ * Added 'preferred' and 'persistent' in this version.
+ */
+struct DataProfileInfo {
+    /** id of the data profile */
+    DataProfileId profileId;
+
+    /** The APN name */
+    string apn;
+
+    /**
+     * One of the PDP_type values in TS 27.007 section 10.1.1. For example, "IP", "IPV6", "IPV4V6",
+     * or "PPP".
+     */
+    string protocol;
+
+    /**
+     * one of the PDP_type values in TS 27.007 section 10.1.1 used on roaming network. For example,
+     * "IP", "IPV6", "IPV4V6", or "PPP".
+     */
+    string roamingProtocol;
+
+    /** APN authentication type */
+    ApnAuthType authType;
+
+    /** The username for APN, or empty string */
+    string user;
+
+    /** The password for APN, or empty string */
+    string password;
+
+    /** Data profile technology type */
+    DataProfileInfoType type;
+
+    /**
+     * The required wait time in seconds after a successful UE initiated disconnect of a given PDN
+     * connection before the device can send a new PDN connection request for that given PDN.
+     */
+    int32_t waitTime;
+
+    /** True to enable the profile, false to disable */
+    bool enabled;
+
+    /** Supported APN types bitmap. See ApnTypes for the value of each bit. */
+    bitfield<ApnTypes> supportedApnTypesBitmap;
+
+    /** The bearer bitmap. See RadioAccessFamily for the value of each bit. */
+    bitfield<RadioAccessFamily> bearerBitmap;
+
+    /** Maximum transmission unit (MTU) size in bytes */
+    int32_t mtu;
+
+    /**
+     * True if this data profile was used to bring up the last default (i.e internet) data
+     * connection successfully.
+     */
+    bool preferred;
+
+    /**
+     * If true, modem must persist this data profile and profileId must not be
+     * set to DataProfileId.INVALID. If the same data profile exists, this data profile must
+     * overwrite it.
+     */
+    bool persistent;
 };
