@@ -19,6 +19,7 @@
 #include <android/hardware/configstore/1.2/ISurfaceFlingerConfigs.h>
 #include <hidl/HidlTransportSupport.h>
 #include <hwminijail/HardwareMinijail.h>
+#include <hwbinder/ProcessState.h>
 
 #include "SurfaceFlingerConfigs.h"
 
@@ -32,6 +33,11 @@ using android::hardware::configstore::V1_2::ISurfaceFlingerConfigs;
 using android::hardware::configstore::V1_2::implementation::SurfaceFlingerConfigs;
 
 int main() {
+
+#ifdef ARCH_ARM_32
+    android::hardware::ProcessState::initWithMmapSize((size_t)(32768));
+#endif
+
     configureRpcThreadpool(10, true);
 
     SetupMinijail("/vendor/etc/seccomp_policy/configstore.policy");

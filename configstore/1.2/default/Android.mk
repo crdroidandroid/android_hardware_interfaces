@@ -18,6 +18,7 @@ include $(LOCAL_PATH)/surfaceflinger.mk
 LOCAL_SHARED_LIBRARIES := \
     libhidlbase \
     libhidltransport \
+    libhwbinder \
     libbase \
     libhwminijail \
     liblog \
@@ -26,6 +27,10 @@ LOCAL_SHARED_LIBRARIES := \
     android.hardware.configstore@1.0 \
     android.hardware.configstore@1.1 \
     android.hardware.configstore@1.2
+
+ifeq ($(TARGET_ARCH),arm)
+LOCAL_CFLAGS := -DARCH_ARM_32
+endif
 
 include $(BUILD_EXECUTABLE)
 
