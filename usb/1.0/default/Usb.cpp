@@ -409,7 +409,7 @@ void* work(void* param) {
 
         for (int n = 0; n < nevents; ++n) {
             if (events[n].data.ptr)
-                (*(void (*)(int, struct data *payload))events[n].data.ptr)
+                (*(void (*)(uint32_t, struct data *payload))events[n].data.ptr)
                     (events[n].events, &payload);
         }
     }
