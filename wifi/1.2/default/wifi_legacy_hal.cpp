@@ -740,6 +740,12 @@ wifi_error WifiLegacyHal::configureRoaming(const std::string& iface_name,
                                                      &config_internal);
 }
 
+wifi_error WifiLegacyHal::setLatencyLevel(const std::string& iface_name,
+                                          uint32_t level) {
+    return global_func_table_.wifi_set_latency_level(
+        getIfaceHandle(iface_name), level);
+}
+
 wifi_error WifiLegacyHal::enableFirmwareRoaming(const std::string& iface_name,
                                                 fw_roaming_state_t state) {
     return global_func_table_.wifi_enable_firmware_roaming(

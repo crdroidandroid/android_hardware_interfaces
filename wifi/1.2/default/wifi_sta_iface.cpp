@@ -248,6 +248,13 @@ Return<void> WifiStaIface::setMacAddress(const hidl_array<uint8_t, 6>& mac,
                            mac);
 }
 
+Return<void> WifiStaIface::setLatencyLevel(uint32_t level,
+                                           setLatencyLevel_cb hidl_status_cb) {
+    return validateAndCall(this, WifiStatusCode::ERROR_WIFI_IFACE_INVALID,
+                           &WifiStaIface::setLatencyLevelInternal,
+                           hidl_status_cb, level);
+}
+
 std::pair<WifiStatus, std::string> WifiStaIface::getNameInternal() {
     return {createWifiStatus(WifiStatusCode::SUCCESS), ifname_};
 }
@@ -619,6 +626,12 @@ WifiStatus WifiStaIface::setMacAddressInternal(
     }
     LOG(DEBUG) << "Successfully SetMacAddress.";
     return createWifiStatus(WifiStatusCode::SUCCESS);
+}
+
+WifiStatus WifiStaIface::setLatencyLevelInternal(uint32_t level) {
+    legacy_hal::wifi_error legacy_status =
+        legacy_hal_.lock()->setLatencyLevel(ifname_, level);
+    return createWifiStatusFromLegacyError(legacy_status);
 }
 
 }  // namespace implementation

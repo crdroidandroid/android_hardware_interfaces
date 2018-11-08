@@ -20,6 +20,7 @@
 #include <android-base/macros.h>
 #include <android/hardware/wifi/1.0/IWifiStaIfaceEventCallback.h>
 #include <android/hardware/wifi/1.2/IWifiStaIface.h>
+#include <vendor/qti/hardware/wifi/1.0/IWifiVendorStaIface.h>
 
 #include <wifi_system/interface_tool.h>
 
@@ -36,7 +37,8 @@ using namespace android::hardware::wifi::V1_0;
 /**
  * HIDL interface object used to control a STA Iface instance.
  */
-class WifiStaIface : public V1_2::IWifiStaIface {
+class WifiStaIface
+    : public vendor::qti::hardware::wifi::V1_0::IWifiVendorStaIface {
    public:
     WifiStaIface(const std::string& ifname,
                  const std::weak_ptr<legacy_hal::WifiLegacyHal> legacy_hal);
@@ -107,6 +109,8 @@ class WifiStaIface : public V1_2::IWifiStaIface {
         getDebugRxPacketFates_cb hidl_status_cb) override;
     Return<void> setMacAddress(const hidl_array<uint8_t, 6>& mac,
                                setMacAddress_cb hidl_status_cb) override;
+    Return<void> setLatencyLevel(uint32_t level,
+                                 setLatencyLevel_cb hidl_status_cb) override;
 
    private:
     // Corresponding worker functions for the HIDL methods.
@@ -151,6 +155,7 @@ class WifiStaIface : public V1_2::IWifiStaIface {
     std::pair<WifiStatus, std::vector<WifiDebugRxPacketFateReport>>
     getDebugRxPacketFatesInternal();
     WifiStatus setMacAddressInternal(const std::array<uint8_t, 6>& mac);
+    WifiStatus setLatencyLevelInternal(uint32_t level);
 
     std::string ifname_;
     std::weak_ptr<legacy_hal::WifiLegacyHal> legacy_hal_;

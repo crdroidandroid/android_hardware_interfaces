@@ -138,6 +138,7 @@ bool initHalFuncTableWithStubs(wifi_hal_fn* hal_fn) {
     populateStubFor(&hal_fn->wifi_reset_tx_power_scenario);
     populateStubFor(&hal_fn->wifi_set_radio_mode_change_handler);
     populateStubFor(&hal_fn->wifi_add_or_remove_virtual_intf);
+    populateStubFor(&hal_fn->wifi_set_latency_level);
     return true;
 }
 }  // namespace legacy_hal
