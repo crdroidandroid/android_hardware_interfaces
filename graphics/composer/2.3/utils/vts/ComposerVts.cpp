@@ -45,6 +45,10 @@ std::unique_ptr<ComposerClient> Composer::createClient() {
     return client;
 }
 
+sp<IComposerClient> ComposerClient::getRaw() const {
+    return mClient;
+}
+
 bool ComposerClient::getDisplayIdentificationData(Display display, uint8_t* outPort,
                                                   std::vector<uint8_t>* outData) {
     bool supported = true;
@@ -62,6 +66,88 @@ bool ComposerClient::getDisplayIdentificationData(Display display, uint8_t* outP
         });
 
     return supported;
+}
+
+std::vector<ColorMode> ComposerClient::getColorModes_2_3(Display display) {
+    std::vector<ColorMode> modes;
+    mClient->getColorModes_2_3(display, [&](const auto& tmpError, const auto& tmpModes) {
+        ASSERT_EQ(Error::NONE, tmpError) << "failed to get color modes";
+        modes = tmpModes;
+    });
+    return modes;
+}
+
+void ComposerClient::setColorMode_2_3(Display display, ColorMode mode, RenderIntent intent) {
+    Error error = mClient->setColorMode_2_3(display, mode, intent);
+    ASSERT_TRUE(error == Error::NONE || error == Error::UNSUPPORTED) << "failed to set color mode";
+}
+
+std::vector<RenderIntent> ComposerClient::getRenderIntents_2_3(Display display, ColorMode mode) {
+    std::vector<RenderIntent> intents;
+    mClient->getRenderIntents_2_3(display, mode, [&](const auto& tmpError, const auto& tmpIntents) {
+        ASSERT_EQ(Error::NONE, tmpError) << "failed to get render intents";
+        intents = tmpIntents;
+    });
+    return intents;
+}
+
+void ComposerClient::getReadbackBufferAttributes_2_3(Display display, PixelFormat* outPixelFormat,
+                                                     Dataspace* outDataspace) {
+    mClient->getReadbackBufferAttributes_2_3(
+        display,
+        [&](const auto& tmpError, const auto& tmpOutPixelFormat, const auto& tmpOutDataspace) {
+            ASSERT_EQ(Error::NONE, tmpError) << "failed to get readback buffer attributes";
+            *outPixelFormat = tmpOutPixelFormat;
+            *outDataspace = tmpOutDataspace;
+        });
+}
+
+bool ComposerClient::getClientTargetSupport_2_3(Display display, uint32_t width, uint32_t height,
+                                                PixelFormat format, Dataspace dataspace) {
+    Error error = mClient->getClientTargetSupport_2_3(display, width, height, format, dataspace);
+    return error == Error::NONE;
+}
+
+Error ComposerClient::getDisplayedContentSamplingAttributes(
+    uint64_t display, PixelFormat& format, Dataspace& dataspace,
+    hidl_bitfield<IComposerClient::FormatColorComponent>& componentMask) {
+    auto error = Error::BAD_PARAMETER;
+    mClient->getDisplayedContentSamplingAttributes(
+        display, [&](const auto& tmpError, const auto& tmpFormat, const auto& tmpDataspace,
+                     const auto& tmpComponentMask) {
+            error = tmpError;
+            format = tmpFormat;
+            dataspace = tmpDataspace;
+            componentMask = tmpComponentMask;
+        });
+    return error;
+}
+
+Error ComposerClient::setDisplayedContentSamplingEnabled(
+    uint64_t display, IComposerClient::DisplayedContentSampling enable,
+    hidl_bitfield<IComposerClient::FormatColorComponent> componentMask, uint64_t maxFrames) {
+    return mClient->setDisplayedContentSamplingEnabled(display, enable, componentMask, maxFrames);
+}
+
+Error ComposerClient::getDisplayedContentSample(uint64_t display, uint64_t maxFrames,
+                                                uint64_t timestamp, uint64_t& frameCount,
+                                                hidl_vec<uint64_t>& sampleComponent0,
+                                                hidl_vec<uint64_t>& sampleComponent1,
+                                                hidl_vec<uint64_t>& sampleComponent2,
+                                                hidl_vec<uint64_t>& sampleComponent3) {
+    auto error = Error::BAD_PARAMETER;
+    mClient->getDisplayedContentSample(
+        display, maxFrames, timestamp,
+        [&](const auto& tmpError, const auto& tmpFrameCount, const auto& tmpSamples0,
+            const auto& tmpSamples1, const auto& tmpSamples2, const auto& tmpSamples3) {
+            error = tmpError;
+            frameCount = tmpFrameCount;
+            sampleComponent0 = tmpSamples0;
+            sampleComponent1 = tmpSamples1;
+            sampleComponent2 = tmpSamples2;
+            sampleComponent3 = tmpSamples3;
+        });
+    return error;
 }
 
 }  // namespace vts

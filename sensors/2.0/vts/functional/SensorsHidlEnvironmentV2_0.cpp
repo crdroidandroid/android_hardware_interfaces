@@ -95,19 +95,19 @@ bool SensorsHidlEnvironmentV2_0::resetHal() {
 }
 
 void SensorsHidlEnvironmentV2_0::HidlTearDown() {
-    stopThread = true;
+    mStopThread = true;
 
     // Wake up the event queue so the poll thread can exit
     mEventQueueFlag->wake(asBaseType(EventQueueFlagBits::READ_AND_PROCESS));
-    pollThread.join();
+    mPollThread.join();
 
     EventFlag::deleteEventFlag(&mEventQueueFlag);
 }
 
 void SensorsHidlEnvironmentV2_0::startPollingThread() {
-    stopThread = false;
-    pollThread = std::thread(pollingThread, this);
-    events.reserve(MAX_RECEIVE_BUFFER_EVENT_COUNT);
+    mStopThread = false;
+    mPollThread = std::thread(pollingThread, this);
+    mEvents.reserve(MAX_RECEIVE_BUFFER_EVENT_COUNT);
 }
 
 void SensorsHidlEnvironmentV2_0::readEvents() {
@@ -123,8 +123,8 @@ void SensorsHidlEnvironmentV2_0::readEvents() {
     size_t eventsToRead = std::min(availableEvents, mEventBuffer.size());
     if (eventsToRead > 0) {
         if (mEventQueue->read(mEventBuffer.data(), eventsToRead)) {
-            for (const auto& e : mEventBuffer) {
-                addEvent(e);
+            for (size_t i = 0; i < eventsToRead; i++) {
+                addEvent(mEventBuffer[i]);
             }
         }
     }
@@ -133,7 +133,7 @@ void SensorsHidlEnvironmentV2_0::readEvents() {
 void SensorsHidlEnvironmentV2_0::pollingThread(SensorsHidlEnvironmentV2_0* env) {
     ALOGD("polling thread start");
 
-    while (!env->stopThread.load()) {
+    while (!env->mStopThread.load()) {
         env->readEvents();
     }
 
