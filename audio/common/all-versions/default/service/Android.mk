@@ -64,7 +64,4 @@ ifeq ($(TARGET_ARCH),arm)
     LOCAL_CFLAGS += -DARCH_ARM_32
 endif
 
-# b/117506164
-LOCAL_SANITIZE := never
-
 include $(BUILD_EXECUTABLE)

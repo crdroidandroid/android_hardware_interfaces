@@ -38,6 +38,41 @@ namespace detail {
 template <typename Interface, typename Hal>
 class ComposerClientImpl : public V2_2::hal::detail::ComposerClientImpl<Interface, Hal> {
    public:
+    Return<Error> setColorMode_2_3(Display display, ColorMode mode, RenderIntent intent) override {
+        return mHal->setColorMode_2_3(display, mode, intent);
+    }
+
+    Return<void> getRenderIntents_2_3(Display display, ColorMode mode,
+                                      IComposerClient::getRenderIntents_2_3_cb hidl_cb) override {
+        std::vector<RenderIntent> intents;
+        Error err = mHal->getRenderIntents_2_3(display, mode, &intents);
+        hidl_cb(err, intents);
+        return Void();
+    }
+
+    Return<void> getColorModes_2_3(Display display,
+                                   IComposerClient::getColorModes_2_3_cb hidl_cb) override {
+        hidl_vec<ColorMode> modes;
+        Error err = mHal->getColorModes_2_3(display, &modes);
+        hidl_cb(err, modes);
+        return Void();
+    }
+
+    Return<void> getReadbackBufferAttributes_2_3(
+        Display display, IComposerClient::getReadbackBufferAttributes_2_3_cb hidl_cb) override {
+        PixelFormat format = PixelFormat::RGB_888;
+        Dataspace dataspace = Dataspace::UNKNOWN;
+        Error error = mHal->getReadbackBufferAttributes_2_3(display, &format, &dataspace);
+        hidl_cb(error, format, dataspace);
+        return Void();
+    }
+
+    Return<Error> getClientTargetSupport_2_3(Display display, uint32_t width, uint32_t height,
+                                             PixelFormat format, Dataspace dataspace) override {
+        Error err = mHal->getClientTargetSupport_2_3(display, width, height, format, dataspace);
+        return err;
+    }
+
     static std::unique_ptr<ComposerClientImpl> create(Hal* hal) {
         auto client = std::make_unique<ComposerClientImpl>(hal);
         return client->init() ? std::move(client) : nullptr;
@@ -53,6 +88,42 @@ class ComposerClientImpl : public V2_2::hal::detail::ComposerClientImpl<Interfac
         std::vector<uint8_t> data;
         Error error = mHal->getDisplayIdentificationData(display, &port, &data);
         hidl_cb(error, port, data);
+        return Void();
+    }
+
+    Return<void> getDisplayedContentSamplingAttributes(
+        uint64_t display,
+        IComposerClient::getDisplayedContentSamplingAttributes_cb hidl_cb) override {
+        common::V1_1::PixelFormat format;
+        common::V1_2::Dataspace dataspace;
+        hidl_bitfield<IComposerClient::FormatColorComponent> componentMask;
+        Error error =
+            mHal->getDisplayedContentSamplingAttributes(display, format, dataspace, componentMask);
+        hidl_cb(error, format, dataspace, componentMask);
+        return Void();
+    }
+
+    Return<Error> setDisplayedContentSamplingEnabled(
+        uint64_t display, IComposerClient::DisplayedContentSampling enable,
+        hidl_bitfield<IComposerClient::FormatColorComponent> componentMask,
+        uint64_t maxFrames) override {
+        return mHal->setDisplayedContentSamplingEnabled(display, enable, componentMask, maxFrames);
+    }
+
+    Return<void> getDisplayedContentSample(
+        uint64_t display, uint64_t maxFrames, uint64_t timestamp,
+        IComposerClient::getDisplayedContentSample_cb hidl_cb) override {
+        uint64_t frameCount;
+        hidl_vec<uint64_t> sampleComponent0;
+        hidl_vec<uint64_t> sampleComponent1;
+        hidl_vec<uint64_t> sampleComponent2;
+        hidl_vec<uint64_t> sampleComponent3;
+
+        Error error = mHal->getDisplayedContentSample(display, maxFrames, timestamp, frameCount,
+                                                      sampleComponent0, sampleComponent1,
+                                                      sampleComponent2, sampleComponent3);
+        hidl_cb(error, frameCount, sampleComponent0, sampleComponent1, sampleComponent2,
+                sampleComponent3);
         return Void();
     }
 
