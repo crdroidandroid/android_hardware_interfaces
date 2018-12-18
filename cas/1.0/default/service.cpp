@@ -37,26 +37,16 @@ using android::hardware::LazyServiceRegistrar;
 using android::hardware::cas::V1_0::IMediaCasService;
 using android::hardware::cas::V1_0::implementation::MediaCasService;
 
-<<<<<<< HEAD
-int main() {
-    #ifdef ARCH_ARM_32
-        android::hardware::ProcessState::initWithMmapSize((size_t)16384);
-    #endif
-
-    ALOGD("android.hardware.cas@1.0-service starting...");
-
-    // The CAS HAL may communicate to other vendor components via
-    // /dev/vndbinder
-    android::ProcessState::initWithDriver("/dev/vndbinder");
-=======
 #ifdef LAZY_SERVICE
 const bool kLazyService = true;
 #else
 const bool kLazyService = false;
 #endif
->>>>>>> 5938d3c6e464ee39ba81da4679f69e479f1661b6
 
 int main() {
+    #ifdef ARCH_ARM_32
+        android::hardware::ProcessState::initWithMmapSize((size_t)16384);
+    #endif
     configureRpcThreadpool(8, true /* callerWillJoin */);
 
     // Setup hwbinder service
