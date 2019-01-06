@@ -16,17 +16,48 @@
 
 package android.hardware.radio.config@1.1;
 
-import android.hardware.radio@1.0::CardState;
-import @1.0::SimSlotStatus;
+/**
+ * Note: IRadioConfig 1.1 is an intermediate layer between Android P and Android Q.
+ * It's specifically designed for CBRS related interfaces. All other interfaces
+ * for Q should be added in IRadioConfig 1.2.
+ */
 
-struct SimSlotStatus {
-    @1.0::SimSlotStatus base;
+/**
+ * A field in PhoneCapability that has information of each logical modem.
+ */
+struct ModemInfo {
     /**
-     * The EID is the eUICC identifier. The EID shall be stored within the ECASD and can be
-     * retrieved by the Device at any time using the standard GlobalPlatform GET DATA command.
-     *
-     * This data is mandatory and applicable only when cardState is CardState:PRESENT and SIM card
-     * supports eUICC.
+     * Logical modem ID.
      */
-    string eid;
+    uint8_t modemId;
+};
+
+/**
+ * Phone capability which describes the data connection capability of modem.
+ * It's used to evaluate possible phone config change, for example from single
+ * SIM device to multi-SIM device.
+ */
+struct PhoneCapability {
+    /**
+     * maxActiveData defines how many logical modems can have
+     * PS attached simultaneously. For example, for L+L modem it
+     * should be 2.
+     */
+    uint8_t maxActiveData;
+    /**
+     * maxActiveData defines how many logical modems can have
+     * internet PDN connections simultaneously. For example, for L+L
+     * DSDS modem it’s 1, and for DSDA modem it’s 2.
+     */
+    uint8_t maxActiveInternetData;
+    /**
+     * Whether modem supports both internet PDN up so
+     * that we can do ping test before tearing down the
+     * other one.
+     */
+    bool isInternetLingeringSupported;
+    /**
+     * List of logical modem information.
+     */
+    vec<ModemInfo> logicalModemList;
 };
