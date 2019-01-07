@@ -54,7 +54,7 @@ int main() {
     android::status_t status;
     if (kLazyService) {
         auto serviceRegistrar = std::make_shared<LazyServiceRegistrar>();
-        status = serviceRegistrar->registerServiceWithCallback(service);
+        status = serviceRegistrar->registerService(service);
     } else {
         status = service->registerAsService();
     }

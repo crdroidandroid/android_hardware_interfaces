@@ -26,8 +26,6 @@ namespace audio {
 namespace CPP_VERSION {
 namespace implementation {
 
-using ::android::hardware::audio::common::CPP_VERSION::AudioDevice;
-
 std::string deviceAddressToHal(const DeviceAddress& address) {
     // HAL assumes that the address is NUL-terminated.
     char halAddress[AUDIO_DEVICE_MAX_ADDRESS_LEN];
@@ -58,7 +56,7 @@ std::string deviceAddressToHal(const DeviceAddress& address) {
     return halAddress;
 }
 
-#if MAJOR_VERSION == 4
+#if MAJOR_VERSION >= 4
 status_t deviceAddressFromHal(audio_devices_t device, const char* halAddress,
                               DeviceAddress* address) {
     if (address == nullptr) {

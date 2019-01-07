@@ -16,12 +16,13 @@
 
 package android.hardware.radio@1.4;
 
-import @1.4::DataProfileInfo;
 import @1.0::Dial;
 import @1.2::DataRequestReason;
 import @1.3::IRadio;
 import @1.4::AccessNetwork;
+import @1.4::DataProfileInfo;
 import @1.4::EmergencyServiceCategory;
+import @1.4::RadioAccessFamily;
 
 /**
  * This interface is used by telephony and telecom to talk to cellular radio.
@@ -105,6 +106,11 @@ interface IRadio extends @1.3::IRadio {
      * Note this API is the same as IRadio.dial except using the
      * @1.4::EmergencyServiceCategory as the input param.
      *
+     * If the number in the 'dialInfo' field is identified as an emergency number in Android,
+     * Android use this request for its emergency call instead of @1.0::IRadio.dial. The
+     * implementation decides how to handle the call (e.g. emergency routing or normal
+     * routing).
+     *
      * If the dialed emergency number does not have a specified emergency service category, the
      * 'categories' field is set to @1.4::EmergencyServiceCategory#UNSPECIFIED; iff either the
      * 'categories' field is set to @1.4::EmergencyServiceCategory#UNSPECIFIED or the underlying
@@ -122,4 +128,24 @@ interface IRadio extends @1.3::IRadio {
      */
     oneway emergencyDial(int32_t serial, Dial dialInfo,
             bitfield<EmergencyServiceCategory> categories);
+
+    /**
+     * Query the preferred network type bitmap.
+     *
+     * @param serial Serial number of request.
+     *
+     * Response callback is IRadioResponse.getPreferredNetworkTypeBitmapResponse()
+     */
+    oneway getPreferredNetworkTypeBitmap(int32_t serial);
+
+    /**
+     * Requests to set the preferred network type for searching and registering.
+     *
+     * @param serial Serial number of request.
+     * @param networkTypeBitmap a 32-bit bitmap of RadioAccessFamily.
+     *
+     * Response callback is IRadioResponse.setPreferredNetworkTypeBitmapResponse()
+     */
+    oneway setPreferredNetworkTypeBitmap(
+            int32_t serial, bitfield<RadioAccessFamily> networkTypeBitmap);
 };

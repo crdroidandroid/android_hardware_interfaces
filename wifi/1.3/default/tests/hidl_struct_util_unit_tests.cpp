@@ -37,6 +37,7 @@ namespace wifi {
 namespace V1_3 {
 namespace implementation {
 using namespace android::hardware::wifi::V1_0;
+using ::android::hardware::wifi::V1_0::WifiChannelWidthInMhz;
 
 class HidlStructUtilTest : public Test {};
 
@@ -166,6 +167,17 @@ TEST_F(HidlStructUtilTest, canConvertLegacyLinkLayerStatsToHidl) {
         for (int i = 0; i < 4; i++) {
             radio.tx_time_per_levels.push_back(rand());
         }
+
+        legacy_hal::wifi_channel_stat channel_stat1 = {
+            .channel = {legacy_hal::WIFI_CHAN_WIDTH_20, 2437, 2437, 0},
+            .cca_busy_time = 0x55,
+            .on_time = 0x1111};
+        legacy_hal::wifi_channel_stat channel_stat2 = {
+            .channel = {legacy_hal::WIFI_CHAN_WIDTH_20, 5180, 5180, 0},
+            .cca_busy_time = 0x66,
+            .on_time = 0x2222};
+        radio.channel_stats.push_back(channel_stat1);
+        radio.channel_stats.push_back(channel_stat2);
     }
 
     V1_3::StaLinkLayerStats converted{};
@@ -210,7 +222,7 @@ TEST_F(HidlStructUtilTest, canConvertLegacyLinkLayerStatsToHidl) {
               converted.iface.wmeVoPktStats.retries);
 
     EXPECT_EQ(legacy_stats.radios.size(), converted.radios.size());
-    for (int i = 0; i < legacy_stats.radios.size(); i++) {
+    for (size_t i = 0; i < legacy_stats.radios.size(); i++) {
         EXPECT_EQ(legacy_stats.radios[i].stats.on_time,
                   converted.radios[i].V1_0.onTimeInMs);
         EXPECT_EQ(legacy_stats.radios[i].stats.tx_time,
@@ -221,7 +233,7 @@ TEST_F(HidlStructUtilTest, canConvertLegacyLinkLayerStatsToHidl) {
                   converted.radios[i].V1_0.onTimeInMsForScan);
         EXPECT_EQ(legacy_stats.radios[i].tx_time_per_levels.size(),
                   converted.radios[i].V1_0.txTimeInMsPerLevel.size());
-        for (int j = 0; j < legacy_stats.radios[i].tx_time_per_levels.size();
+        for (size_t j = 0; j < legacy_stats.radios[i].tx_time_per_levels.size();
              j++) {
             EXPECT_EQ(legacy_stats.radios[i].tx_time_per_levels[j],
                       converted.radios[i].V1_0.txTimeInMsPerLevel[j]);
@@ -236,7 +248,46 @@ TEST_F(HidlStructUtilTest, canConvertLegacyLinkLayerStatsToHidl) {
                   converted.radios[i].onTimeInMsForPnoScan);
         EXPECT_EQ(legacy_stats.radios[i].stats.on_time_hs20,
                   converted.radios[i].onTimeInMsForHs20Scan);
+        EXPECT_EQ(legacy_stats.radios[i].channel_stats.size(),
+                  converted.radios[i].channelStats.size());
+        for (size_t k = 0; k < legacy_stats.radios[i].channel_stats.size();
+             k++) {
+            auto& legacy_channel_st = legacy_stats.radios[i].channel_stats[k];
+            EXPECT_EQ(WifiChannelWidthInMhz::WIDTH_20,
+                      converted.radios[i].channelStats[k].channel.width);
+            EXPECT_EQ(WifiChannelInMhz(legacy_channel_st.channel.center_freq),
+                      converted.radios[i].channelStats[k].channel.centerFreq);
+            EXPECT_EQ(WifiChannelInMhz(legacy_channel_st.channel.center_freq0),
+                      converted.radios[i].channelStats[k].channel.centerFreq0);
+            EXPECT_EQ(WifiChannelInMhz(legacy_channel_st.channel.center_freq1),
+                      converted.radios[i].channelStats[k].channel.centerFreq1);
+            EXPECT_EQ(legacy_channel_st.cca_busy_time,
+                      converted.radios[i].channelStats[k].ccaBusyTimeInMs);
+            EXPECT_EQ(legacy_channel_st.on_time,
+                      converted.radios[i].channelStats[k].onTimeInMs);
+        }
     }
+}
+
+TEST_F(HidlStructUtilTest, CanConvertLegacyFeaturesToHidl) {
+    using HidlChipCaps = V1_3::IWifiChip::ChipCapabilityMask;
+
+    uint32_t hidle_caps;
+
+    uint32_t legacy_feature_set =
+            WIFI_FEATURE_D2D_RTT | WIFI_FEATURE_SET_LATENCY_MODE;
+    uint32_t legacy_logger_feature_set =
+            legacy_hal::WIFI_LOGGER_DRIVER_DUMP_SUPPORTED;
+
+    ASSERT_TRUE(hidl_struct_util::convertLegacyFeaturesToHidlChipCapabilities(
+        legacy_feature_set, legacy_logger_feature_set, &hidle_caps));
+
+    EXPECT_EQ(HidlChipCaps::DEBUG_RING_BUFFER_VENDOR_DATA |
+                  HidlChipCaps::DEBUG_HOST_WAKE_REASON_STATS |
+                  HidlChipCaps::DEBUG_ERROR_ALERTS | HidlChipCaps::D2D_RTT |
+                  HidlChipCaps::SET_LATENCY_MODE |
+                  HidlChipCaps::DEBUG_MEMORY_DRIVER_DUMP,
+              hidle_caps);
 }
 }  // namespace implementation
 }  // namespace V1_3

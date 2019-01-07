@@ -1,6 +1,0 @@
-# List of unresolved conflicts
-# Generated with `git ls-files --unmerged`
-
-100644 04a8ad9729ba758091143273875144181442818e 1	cas/1.0/default/service.cpp
-100644 c47be7a8d7afcf1916ff5d92e0d352fa392bc34b 2	cas/1.0/default/service.cpp
-100644 2e6e55d1aaf6861131cb1d98a462f58747643bf5 3	cas/1.0/default/service.cpp
