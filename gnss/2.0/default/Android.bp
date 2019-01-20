@@ -19,7 +19,10 @@ cc_binary {
     init_rc: ["android.hardware.gnss@2.0-service.rc"],
     relative_install_path: "hw",
     vendor: true,
+    vintf_fragments: ["android.hardware.gnss@2.0-service.xml"],
     srcs: [
+        "AGnss.cpp",
+        "AGnssRil.cpp",
         "Gnss.cpp",
         "GnssMeasurement.cpp",
         "service.cpp"
@@ -30,6 +33,7 @@ cc_binary {
         "libutils",
         "liblog",
         "android.hardware.gnss@2.0",
+        "android.hardware.gnss.measurement_corrections@1.0",
         "android.hardware.gnss@1.0",
         "android.hardware.gnss@1.1",
     ],

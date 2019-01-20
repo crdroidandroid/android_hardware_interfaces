@@ -18,6 +18,11 @@
 
 #include "Gnss.h"
 #include <log/log.h>
+#include "AGnss.h"
+#include "AGnssRil.h"
+#include "GnssMeasurement.h"
+
+using ::android::hardware::Status;
 
 namespace android {
 namespace hardware {
@@ -25,7 +30,8 @@ namespace gnss {
 namespace V2_0 {
 namespace implementation {
 
-sp<V1_1::IGnssCallback> Gnss::sGnssCallback = nullptr;
+sp<V2_0::IGnssCallback> Gnss::sGnssCallback_2_0 = nullptr;
+sp<V1_1::IGnssCallback> Gnss::sGnssCallback_1_1 = nullptr;
 
 // Methods from V1_0::IGnss follow.
 Return<bool> Gnss::setCallback(const sp<V1_0::IGnssCallback>&) {
@@ -91,8 +97,8 @@ Return<sp<V1_0::IGnssNi>> Gnss::getExtensionGnssNi() {
 }
 
 Return<sp<V1_0::IGnssMeasurement>> Gnss::getExtensionGnssMeasurement() {
-    // TODO implement
-    return sp<V1_0::IGnssMeasurement>{};
+    // Not supported
+    return nullptr;
 }
 
 Return<sp<V1_0::IGnssNavigationMessage>> Gnss::getExtensionGnssNavigationMessage() {
@@ -128,23 +134,23 @@ Return<bool> Gnss::setCallback_1_1(const sp<V1_1::IGnssCallback>& callback) {
         return false;
     }
 
-    sGnssCallback = callback;
+    sGnssCallback_1_1 = callback;
 
-    uint32_t capabilities = 0x0;
-    auto ret = sGnssCallback->gnssSetCapabilitesCb(capabilities);
+    uint32_t capabilities = (uint32_t)V1_0::IGnssCallback::Capabilities::MEASUREMENTS;
+    auto ret = sGnssCallback_1_1->gnssSetCapabilitesCb(capabilities);
     if (!ret.isOk()) {
         ALOGE("%s: Unable to invoke callback", __func__);
     }
 
     V1_1::IGnssCallback::GnssSystemInfo gnssInfo = {.yearOfHw = 2019};
 
-    ret = sGnssCallback->gnssSetSystemInfoCb(gnssInfo);
+    ret = sGnssCallback_1_1->gnssSetSystemInfoCb(gnssInfo);
     if (!ret.isOk()) {
         ALOGE("%s: Unable to invoke callback", __func__);
     }
 
     auto gnssName = "Google Mock GNSS Implementation v2.0";
-    ret = sGnssCallback->gnssNameCb(gnssName);
+    ret = sGnssCallback_1_1->gnssNameCb(gnssName);
     if (!ret.isOk()) {
         ALOGE("%s: Unable to invoke callback", __func__);
     }
@@ -165,8 +171,8 @@ Return<sp<V1_1::IGnssConfiguration>> Gnss::getExtensionGnssConfiguration_1_1() {
 }
 
 Return<sp<V1_1::IGnssMeasurement>> Gnss::getExtensionGnssMeasurement_1_1() {
-    // TODO implement
-    return sp<V1_1::IGnssMeasurement>{};
+    ALOGD("Gnss::getExtensionGnssMeasurement_1_1");
+    return new GnssMeasurement();
 }
 
 Return<bool> Gnss::injectBestLocation(const V1_0::GnssLocation&) {
@@ -175,9 +181,54 @@ Return<bool> Gnss::injectBestLocation(const V1_0::GnssLocation&) {
 }
 
 // Methods from V2_0::IGnss follow.
+Return<sp<V2_0::IAGnss>> Gnss::getExtensionAGnss_2_0() {
+    return new AGnss{};
+}
+
+Return<sp<V2_0::IAGnssRil>> Gnss::getExtensionAGnssRil_2_0() {
+    return new AGnssRil{};
+}
+
 Return<sp<V2_0::IGnssMeasurement>> Gnss::getExtensionGnssMeasurement_2_0() {
+    ALOGD("Gnss::getExtensionGnssMeasurement_2_0");
+    return new GnssMeasurement();
+}
+
+Return<sp<measurement_corrections::V1_0::IMeasurementCorrections>>
+Gnss::getExtensionMeasurementCorrections() {
     // TODO implement
-    return sp<V2_0::IGnssMeasurement>{};
+    return sp<measurement_corrections::V1_0::IMeasurementCorrections>{};
+}
+
+Return<bool> Gnss::setCallback_2_0(const sp<V2_0::IGnssCallback>& callback) {
+    ALOGD("Gnss::setCallback_2_0");
+    if (callback == nullptr) {
+        ALOGE("%s: Null callback ignored", __func__);
+        return false;
+    }
+
+    sGnssCallback_2_0 = callback;
+
+    uint32_t capabilities = 0x0;
+    auto ret = sGnssCallback_2_0->gnssSetCapabilitesCb(capabilities);
+    if (!ret.isOk()) {
+        ALOGE("%s: Unable to invoke callback", __func__);
+    }
+
+    V1_1::IGnssCallback::GnssSystemInfo gnssInfo = {.yearOfHw = 2019};
+
+    ret = sGnssCallback_2_0->gnssSetSystemInfoCb(gnssInfo);
+    if (!ret.isOk()) {
+        ALOGE("%s: Unable to invoke callback", __func__);
+    }
+
+    auto gnssName = "Google Mock GNSS Implementation v2.0";
+    ret = sGnssCallback_2_0->gnssNameCb(gnssName);
+    if (!ret.isOk()) {
+        ALOGE("%s: Unable to invoke callback", __func__);
+    }
+
+    return true;
 }
 
 }  // namespace implementation

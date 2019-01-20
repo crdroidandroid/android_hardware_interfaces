@@ -61,6 +61,7 @@ struct PacketFilterCapabilities {
 struct LinkLayerRadioStats {
     wifi_radio_stat stats;
     std::vector<uint32_t> tx_time_per_levels;
+    std::vector<wifi_channel_stat> channel_stats;
 };
 
 struct LinkLayerStats {
@@ -254,6 +255,8 @@ class WifiLegacyHal {
     wifi_error selectTxPowerScenario(const std::string& iface_name,
                                      wifi_power_scenario scenario);
     wifi_error resetTxPowerScenario(const std::string& iface_name);
+    wifi_error setLatencyMode(const std::string& iface_name,
+                              wifi_latency_mode mode);
     // Logger/debug functions.
     std::pair<wifi_error, uint32_t> getLoggerSupportedFeatureSet(
         const std::string& iface_name);

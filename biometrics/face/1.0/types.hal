@@ -57,6 +57,21 @@ enum Status : uint32_t {
     NOT_ENROLLED = 4
 };
 
+enum Feature : uint32_t {
+    /**
+     * Require the user to look at the device during enrollment and
+     * authentication. Note this is to accommodate people who have limited
+     * vision. Must be enabled by default.
+     */
+    REQUIRE_ATTENTION = 1,
+
+    /**
+     * Require a diverse set of poses during enrollment. Note this is to
+     * accommodate people with limited mobility. Must be enabled by default.
+     */
+    REQUIRE_DIVERSITY = 2
+};
+
 /**
  * Face errors represent events that can't be immediately recovered by user
  * intervention. These are returned in the onError callback.
@@ -106,6 +121,8 @@ enum FaceError : int32_t {
 
     /**
      * Face authentication is locked out due to too many unsuccessful attempts.
+     * This is a "soft" lockout, and authentication can be restarted after
+     * a period of time, generally on the order of 30 seconds.
      */
     LOCKOUT = 7,
 
@@ -113,6 +130,12 @@ enum FaceError : int32_t {
      * Used to enable a vendor-specific error message.
      */
     VENDOR = 8,
+
+    /**
+     * Face authentication is disabled until the user unlocks with strong
+     * authentication (PIN/Pattern/Password).
+     */
+    LOCKOUT_PERMANENT = 9
 };
 
 /**

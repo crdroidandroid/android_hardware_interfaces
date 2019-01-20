@@ -19,7 +19,7 @@ package android.hardware.radio.config@1.1;
 /**
  * Note: IRadioConfig 1.1 is an intermediate layer between Android P and Android Q.
  * It's specifically designed for CBRS related interfaces. All other interfaces
- * for Q should be added in IRadioConfig 1.2.
+ * for Q are be added in IRadioConfig 1.2.
  */
 
 /**

@@ -29,11 +29,12 @@ namespace audio {
 namespace CPP_VERSION {
 namespace implementation {
 
-using ::android::hardware::audio::CPP_VERSION::DeviceAddress;
+using namespace ::android::hardware::audio::common::CPP_VERSION;
+using namespace ::android::hardware::audio::CPP_VERSION;
 
 std::string deviceAddressToHal(const DeviceAddress& address);
 
-#if MAJOR_VERSION == 4
+#if MAJOR_VERSION >= 4
 bool halToMicrophoneCharacteristics(MicrophoneInfo* pDst,
                                     const struct audio_microphone_characteristic_t& src);
 #endif

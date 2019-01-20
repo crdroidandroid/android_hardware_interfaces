@@ -37,18 +37,9 @@ using android::hardware::wifi::V1_0::ChipModeId;
 using android::hardware::wifi::V1_0::IfaceType;
 using android::hardware::wifi::V1_0::IWifiChip;
 
-constexpr ChipModeId kInvalidModeId = UINT32_MAX;
-// These mode ID's should be unique (even across combo versions). Refer to
-// handleChipConfiguration() for it's usage.
-// Mode ID's for V1
-constexpr ChipModeId kV1StaChipModeId = 0;
-constexpr ChipModeId kV1ApChipModeId = 1;
-// Mode ID for V2
-constexpr ChipModeId kV2ChipModeId = 2;
-
 constexpr char kCpioMagic[] = "070701";
-constexpr size_t kMaxBufferSizeBytes = 1024 * 1024;
-constexpr uint32_t kMaxRingBufferFileAgeSeconds = 60 * 60;
+constexpr size_t kMaxBufferSizeBytes = 1024 * 1024 * 3;
+constexpr uint32_t kMaxRingBufferFileAgeSeconds = 60 * 60 * 10;
 constexpr uint32_t kMaxRingBufferFileNum = 20;
 constexpr char kTombstoneFolderPath[] = "/data/vendor/tombstones/wifi/";
 
@@ -319,10 +310,9 @@ WifiChip::WifiChip(
       mode_controller_(mode_controller),
       feature_flags_(feature_flags),
       is_valid_(true),
-      current_mode_id_(kInvalidModeId),
-      debug_ring_buffer_cb_registered_(false) {
-    populateModes();
-}
+      current_mode_id_(feature_flags::chip_mode_ids::kInvalid),
+      modes_(feature_flags.lock()->getChipModes()),
+      debug_ring_buffer_cb_registered_(false) {}
 
 void WifiChip::invalidate() {
     if (!writeRingbufferFilesInternal()) {
@@ -526,6 +516,13 @@ Return<void> WifiChip::forceDumpToDebugRingBuffer(
                            hidl_status_cb, ring_name);
 }
 
+Return<void> WifiChip::flushRingBufferToFile(
+    flushRingBufferToFile_cb hidl_status_cb) {
+    return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
+                           &WifiChip::flushRingBufferToFileInternal,
+                           hidl_status_cb);
+}
+
 Return<void> WifiChip::stopLoggingToDebugRingBuffer(
     stopLoggingToDebugRingBuffer_cb hidl_status_cb) {
     return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
@@ -562,6 +559,13 @@ Return<void> WifiChip::resetTxPowerScenario(
                            hidl_status_cb);
 }
 
+Return<void> WifiChip::setLatencyMode(LatencyMode mode,
+                                      setLatencyMode_cb hidl_status_cb) {
+    return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
+                           &WifiChip::setLatencyModeInternal, hidl_status_cb,
+                           mode);
+}
+
 Return<void> WifiChip::registerEventCallback_1_2(
     const sp<V1_2::IWifiChipEventCallback>& event_callback,
     registerEventCallback_cb hidl_status_cb) {
@@ -575,6 +579,12 @@ Return<void> WifiChip::selectTxPowerScenario_1_2(
     return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
                            &WifiChip::selectTxPowerScenarioInternal_1_2,
                            hidl_status_cb, scenario);
+}
+
+Return<void> WifiChip::getCapabilities_1_3(getCapabilities_cb hidl_status_cb) {
+    return validateAndCall(this, WifiStatusCode::ERROR_WIFI_CHIP_INVALID,
+                           &WifiChip::getCapabilitiesInternal_1_3,
+                           hidl_status_cb);
 }
 
 Return<void> WifiChip::debug(const hidl_handle& handle,
@@ -621,6 +631,11 @@ WifiStatus WifiChip::registerEventCallbackInternal(
 }
 
 std::pair<WifiStatus, uint32_t> WifiChip::getCapabilitiesInternal() {
+    // Deprecated support for this callback.
+    return {createWifiStatus(WifiStatusCode::ERROR_NOT_SUPPORTED), 0};
+}
+
+std::pair<WifiStatus, uint32_t> WifiChip::getCapabilitiesInternal_1_3() {
     legacy_hal::wifi_error legacy_status;
     uint32_t legacy_feature_set;
     uint32_t legacy_logger_feature_set;
@@ -1041,6 +1056,14 @@ WifiStatus WifiChip::forceDumpToDebugRingBufferInternal(
     return createWifiStatusFromLegacyError(legacy_status);
 }
 
+WifiStatus WifiChip::flushRingBufferToFileInternal() {
+    if (!writeRingbufferFilesInternal()) {
+        LOG(ERROR) << "Error writing files to flash";
+        return createWifiStatus(WifiStatusCode::ERROR_UNKNOWN);
+    }
+    return createWifiStatus(WifiStatusCode::SUCCESS);
+}
+
 WifiStatus WifiChip::stopLoggingToDebugRingBufferInternal() {
     legacy_hal::wifi_error legacy_status =
         legacy_hal_.lock()->deregisterRingBufferCallbackHandler(
@@ -1107,6 +1130,13 @@ WifiStatus WifiChip::resetTxPowerScenarioInternal() {
     return createWifiStatusFromLegacyError(legacy_status);
 }
 
+WifiStatus WifiChip::setLatencyModeInternal(LatencyMode mode) {
+    auto legacy_status = legacy_hal_.lock()->setLatencyMode(
+        getWlan0IfaceName(),
+        hidl_struct_util::convertHidlLatencyModeToLegacy(mode));
+    return createWifiStatusFromLegacyError(legacy_status);
+}
+
 WifiStatus WifiChip::registerEventCallbackInternal_1_2(
     const sp<V1_2::IWifiChipEventCallback>& event_callback) {
     if (!event_cb_handler_.addCallback(event_callback)) {
@@ -1142,9 +1172,9 @@ WifiStatus WifiChip::handleChipConfiguration(
     }
     // Firmware mode change not needed for V2 devices.
     bool success = true;
-    if (mode_id == kV1StaChipModeId) {
+    if (mode_id == feature_flags::chip_mode_ids::kV1Sta) {
         success = mode_controller_.lock()->changeFirmwareMode(IfaceType::STA);
-    } else if (mode_id == kV1ApChipModeId) {
+    } else if (mode_id == feature_flags::chip_mode_ids::kV1Ap) {
         success = mode_controller_.lock()->changeFirmwareMode(IfaceType::AP);
     }
     if (!success) {
@@ -1234,93 +1264,6 @@ WifiStatus WifiChip::registerRadioModeChangeCallback() {
         legacy_hal_.lock()->registerRadioModeChangeCallbackHandler(
             getWlan0IfaceName(), on_radio_mode_change_callback);
     return createWifiStatusFromLegacyError(legacy_status);
-}
-
-void WifiChip::populateModes() {
-    // The chip combination supported for current devices is fixed.
-    // They can be one of the following based on device features:
-    // a) 2 separate modes of operation with 1 interface combination each:
-    //    Mode 1 (STA mode): Will support 1 STA and 1 P2P or NAN(optional)
-    //                       concurrent iface operations.
-    //    Mode 2 (AP mode): Will support 1 AP iface operation.
-    //
-    // b) 1 mode of operation with 2 interface combinations
-    // (conditional on isDualInterfaceSupported()):
-    //    Interface Combination 1: Will support 1 STA and 1 P2P or NAN(optional)
-    //                             concurrent iface operations.
-    //    Interface Combination 2: Will support 1 STA and 1 AP concurrent
-    //                             iface operations.
-    // If Aware is enabled (conditional on isAwareSupported()), the iface
-    // combination will be modified to support either P2P or NAN in place of
-    // just P2P.
-    if (feature_flags_.lock()->isDualInterfaceSupported()) {
-        // V2 Iface combinations for Mode Id = 2.
-        const IWifiChip::ChipIfaceCombinationLimit
-            chip_iface_combination_limit_1 = {{IfaceType::STA}, 1};
-        const IWifiChip::ChipIfaceCombinationLimit
-            chip_iface_combination_limit_2 = {{IfaceType::AP}, 1};
-        IWifiChip::ChipIfaceCombinationLimit chip_iface_combination_limit_3;
-        if (feature_flags_.lock()->isAwareSupported()) {
-            chip_iface_combination_limit_3 = {{IfaceType::P2P, IfaceType::NAN},
-                                              1};
-        } else {
-            chip_iface_combination_limit_3 = {{IfaceType::P2P}, 1};
-        }
-        const IWifiChip::ChipIfaceCombination chip_iface_combination_1 = {
-            {chip_iface_combination_limit_1, chip_iface_combination_limit_2}};
-        const IWifiChip::ChipIfaceCombination chip_iface_combination_2 = {
-            {chip_iface_combination_limit_1, chip_iface_combination_limit_3}};
-        if (feature_flags_.lock()->isApDisabled()) {
-            const IWifiChip::ChipMode chip_mode = {kV2ChipModeId,
-                                                   {chip_iface_combination_2}};
-            modes_ = {chip_mode};
-        } else {
-          IWifiChip::ChipMode chip_mode;
-          if (feature_flags_.lock()->isQcDualApSupported()) {
-            const IWifiChip::ChipIfaceCombinationLimit
-                chip_iface_combination_limit_4 = {{IfaceType::AP}, 2};
-            const IWifiChip::ChipIfaceCombination chip_iface_combination_3 = {
-                {chip_iface_combination_limit_4}};
-            chip_mode = {kV2ChipModeId,
-                         {chip_iface_combination_1,
-                          chip_iface_combination_2,
-                          chip_iface_combination_3}};
-          } else {
-            chip_mode = {kV2ChipModeId,
-                         {chip_iface_combination_1,
-                          chip_iface_combination_2}};
-          }
-          modes_ = {chip_mode};
-        }
-    } else {
-        // V1 Iface combinations for Mode Id = 0. (STA Mode)
-        const IWifiChip::ChipIfaceCombinationLimit
-            sta_chip_iface_combination_limit_1 = {{IfaceType::STA}, 1};
-        IWifiChip::ChipIfaceCombinationLimit sta_chip_iface_combination_limit_2;
-        if (feature_flags_.lock()->isAwareSupported()) {
-            sta_chip_iface_combination_limit_2 = {
-                {IfaceType::P2P, IfaceType::NAN}, 1};
-        } else {
-            sta_chip_iface_combination_limit_2 = {{IfaceType::P2P}, 1};
-        }
-        const IWifiChip::ChipIfaceCombination sta_chip_iface_combination = {
-            {sta_chip_iface_combination_limit_1,
-             sta_chip_iface_combination_limit_2}};
-        const IWifiChip::ChipMode sta_chip_mode = {
-            kV1StaChipModeId, {sta_chip_iface_combination}};
-        // Iface combinations for Mode Id = 1. (AP Mode)
-        const IWifiChip::ChipIfaceCombinationLimit
-            ap_chip_iface_combination_limit = {{IfaceType::AP}, 1};
-        const IWifiChip::ChipIfaceCombination ap_chip_iface_combination = {
-            {ap_chip_iface_combination_limit}};
-        const IWifiChip::ChipMode ap_chip_mode = {kV1ApChipModeId,
-                                                  {ap_chip_iface_combination}};
-        if (feature_flags_.lock()->isApDisabled()) {
-            modes_ = {sta_chip_mode};
-        } else {
-            modes_ = {sta_chip_mode, ap_chip_mode};
-        }
-    }
 }
 
 std::vector<IWifiChip::ChipIfaceCombination>
