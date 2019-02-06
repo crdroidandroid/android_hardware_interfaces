@@ -15,6 +15,7 @@
  */
 
 #include <android-base/logging.h>
+#include <hidl/HidlLazyUtils.h>
 #include <hidl/HidlTransportSupport.h>
 #include <utils/Looper.h>
 #include <utils/StrongPointer.h>
@@ -28,6 +29,7 @@
 
 using android::hardware::configureRpcThreadpool;
 using android::hardware::joinRpcThreadpool;
+using android::hardware::LazyServiceRegistrar;
 using android::hardware::wifi::V1_3::implementation::feature_flags::
     WifiFeatureFlags;
 using android::hardware::wifi::V1_3::implementation::legacy_hal::WifiLegacyHal;
@@ -45,6 +47,12 @@ size_t getHWBinderMmapSize() {
 }
 #endif /* ARCH_ARM_32 */
 
+#ifdef LAZY_SERVICE
+const bool kLazyService = true;
+#else
+const bool kLazyService = false;
+#endif
+
 int main(int /*argc*/, char** argv) {
 #ifdef ARCH_ARM_32
     android::hardware::ProcessState::initWithMmapSize(getHWBinderMmapSize());
@@ -61,8 +69,14 @@ int main(int /*argc*/, char** argv) {
             std::make_shared<WifiLegacyHal>(),
             std::make_shared<WifiModeController>(),
             std::make_shared<WifiFeatureFlags>());
-    CHECK_EQ(service->registerAsService(), android::NO_ERROR)
-        << "Failed to register wifi HAL";
+    if (kLazyService) {
+        LazyServiceRegistrar registrar;
+        CHECK_EQ(registrar.registerService(service), android::NO_ERROR)
+            << "Failed to register wifi HAL";
+    } else {
+        CHECK_EQ(service->registerAsService(), android::NO_ERROR)
+            << "Failed to register wifi HAL";
+    }
 
     joinRpcThreadpool();
 

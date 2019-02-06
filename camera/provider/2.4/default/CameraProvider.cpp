@@ -41,11 +41,8 @@ const char *kLegacyProviderName = "legacy/0";
 const char *kExternalProviderName = "external/0";
 // "device@<version>/legacy/<id>"
 const std::regex kDeviceNameRE("device@([0-9]+\\.[0-9]+)/legacy/(.+)");
-const char *kHAL3_2 = "3.2";
-const char *kHAL3_3 = "3.3";
 const char *kHAL3_4 = "3.4";
 const char *kHAL3_5 = "3.5";
-const char *kHAL1_0 = "1.0";
 const int kMaxCameraDeviceNameLen = 128;
 const int kMaxCameraIdLen = 16;
 
@@ -143,7 +140,6 @@ void CameraProvider::sCameraDeviceStatusChange(
         int new_status) {
     CameraProvider* cp = const_cast<CameraProvider*>(
             static_cast<const CameraProvider*>(callbacks));
-    bool found = false;
 
     if (cp == nullptr) {
         ALOGE("%s: callback ops is null", __FUNCTION__);
@@ -155,17 +151,23 @@ void CameraProvider::sCameraDeviceStatusChange(
     snprintf(cameraId, sizeof(cameraId), "%d", camera_id);
     std::string cameraIdStr(cameraId);
     cp->mCameraStatusMap[cameraIdStr] = (camera_device_status_t) new_status;
-    if (cp->mCallbacks != nullptr) {
-        CameraDeviceStatus status = (CameraDeviceStatus) new_status;
-        for (auto const& deviceNamePair : cp->mCameraDeviceNames) {
-            if (cameraIdStr.compare(deviceNamePair.first) == 0) {
-                cp->mCallbacks->cameraDeviceStatusChange(
-                        deviceNamePair.second, status);
-                found = true;
-            }
-        }
 
-        switch (status) {
+    if (cp->mCallbacks == nullptr) {
+        // For camera connected before mCallbacks is set, the corresponding
+        // addDeviceNames() would be called later in setCallbacks().
+        return;
+    }
+
+    bool found = false;
+    CameraDeviceStatus status = (CameraDeviceStatus)new_status;
+    for (auto const& deviceNamePair : cp->mCameraDeviceNames) {
+        if (cameraIdStr.compare(deviceNamePair.first) == 0) {
+            cp->mCallbacks->cameraDeviceStatusChange(deviceNamePair.second, status);
+            found = true;
+        }
+    }
+
+    switch (status) {
         case CameraDeviceStatus::PRESENT:
         case CameraDeviceStatus::ENUMERATING:
             if (!found) {
@@ -176,7 +178,6 @@ void CameraProvider::sCameraDeviceStatusChange(
             if (found) {
                 cp->removeDeviceNames(camera_id);
             }
-        }
     }
 }
 
@@ -222,22 +223,6 @@ std::string CameraProvider::getLegacyCameraId(const hidl_string& deviceName) {
     return cameraId;
 }
 
-int CameraProvider::getCameraDeviceVersion(const hidl_string& deviceName) {
-    std::string deviceVersion;
-    bool match = matchDeviceName(deviceName, &deviceVersion, nullptr);
-    if (!match) {
-        return -1;
-    }
-    if (deviceVersion == kHAL3_3) {
-        return CAMERA_DEVICE_API_VERSION_3_3;
-    } else if (deviceVersion == kHAL3_2) {
-        return CAMERA_DEVICE_API_VERSION_3_2;
-    } else if (deviceVersion == kHAL1_0) {
-        return CAMERA_DEVICE_API_VERSION_1_0;
-    }
-    return 0;
-}
-
 std::string CameraProvider::getHidlDeviceName(
         std::string cameraId, int deviceVersion) {
     // Maybe consider create a version check method and SortedVec to speed up?
@@ -245,9 +230,16 @@ std::string CameraProvider::getHidlDeviceName(
             deviceVersion != CAMERA_DEVICE_API_VERSION_3_2 &&
             deviceVersion != CAMERA_DEVICE_API_VERSION_3_3 &&
             deviceVersion != CAMERA_DEVICE_API_VERSION_3_4 &&
-            deviceVersion != CAMERA_DEVICE_API_VERSION_3_5) {
+            deviceVersion != CAMERA_DEVICE_API_VERSION_3_5 &&
+            deviceVersion != CAMERA_DEVICE_API_VERSION_3_6) {
         return hidl_string("");
     }
+
+    // Supported combinations:
+    // CAMERA_DEVICE_API_VERSION_1_0 -> ICameraDevice@1.0
+    // CAMERA_DEVICE_API_VERSION_3_[2-4] -> ICameraDevice@[3.2|3.3]
+    // CAMERA_DEVICE_API_VERSION_3_5 + CAMERA_MODULE_API_VERSION_2_4 -> ICameraDevice@3.4
+    // CAMERA_DEVICE_API_VERSION_3_[5-6] + CAMERA_MODULE_API_VERSION_2_5 -> ICameraDevice@3.5
     bool isV1 = deviceVersion == CAMERA_DEVICE_API_VERSION_1_0;
     int versionMajor = isV1 ? 1 : 3;
     int versionMinor = isV1 ? 0 : mPreferredHal3MinorVersion;
@@ -257,6 +249,8 @@ std::string CameraProvider::getHidlDeviceName(
         } else {
             versionMinor = 4;
         }
+    } else if (deviceVersion == CAMERA_DEVICE_API_VERSION_3_6) {
+        versionMinor = 5;
     }
     char deviceName[kMaxCameraDeviceNameLen];
     snprintf(deviceName, sizeof(deviceName), "device@%d.%d/legacy/%s",
@@ -356,7 +350,8 @@ int CameraProvider::checkCameraVersion(int id, camera_info info) {
 
     // device_version undefined in CAMERA_MODULE_API_VERSION_1_0,
     // All CAMERA_MODULE_API_VERSION_1_0 devices are backward-compatible
-    if (mModule->getModuleApiVersion() >= CAMERA_MODULE_API_VERSION_2_0) {
+    uint16_t moduleVersion = mModule->getModuleApiVersion();
+    if (moduleVersion >= CAMERA_MODULE_API_VERSION_2_0) {
         // Verify the device version is in the supported range
         switch (info.device_version) {
             case CAMERA_DEVICE_API_VERSION_1_0:
@@ -365,6 +360,20 @@ int CameraProvider::checkCameraVersion(int id, camera_info info) {
             case CAMERA_DEVICE_API_VERSION_3_4:
             case CAMERA_DEVICE_API_VERSION_3_5:
                 // in support
+                break;
+            case CAMERA_DEVICE_API_VERSION_3_6:
+                /**
+                 * ICameraDevice@3.5 contains APIs from both
+                 * CAMERA_DEVICE_API_VERSION_3_6 and CAMERA_MODULE_API_VERSION_2_5
+                 * so we require HALs to uprev both for simplified supported combinations.
+                 * HAL can still opt in individual new APIs indepedently.
+                 */
+                if (moduleVersion < CAMERA_MODULE_API_VERSION_2_5) {
+                    ALOGE("%s: Device %d has unsupported version combination:"
+                            "HAL version %x and module version %x",
+                            __FUNCTION__, id, info.device_version, moduleVersion);
+                    return NO_INIT;
+                }
                 break;
             case CAMERA_DEVICE_API_VERSION_2_0:
             case CAMERA_DEVICE_API_VERSION_2_1:
@@ -439,8 +448,22 @@ bool CameraProvider::setUpVendorTags() {
 
 // Methods from ::android::hardware::camera::provider::V2_4::ICameraProvider follow.
 Return<Status> CameraProvider::setCallback(const sp<ICameraProviderCallback>& callback)  {
+    if (callback == nullptr) {
+        return Status::ILLEGAL_ARGUMENT;
+    }
+
     Mutex::Autolock _l(mCbLock);
     mCallbacks = callback;
+
+    // Add and report all presenting external cameras.
+    for (auto const& statusPair : mCameraStatusMap) {
+        int id = std::stoi(statusPair.first);
+        auto status = static_cast<CameraDeviceStatus>(statusPair.second);
+        if (id >= mNumberOfLegacyCameras && status != CameraDeviceStatus::NOT_PRESENT) {
+            addDeviceNames(id, status, true);
+        }
+    }
+
     return Status::OK;
 }
 
@@ -452,6 +475,11 @@ Return<void> CameraProvider::getVendorTags(getVendorTags_cb _hidl_cb)  {
 Return<void> CameraProvider::getCameraIdList(getCameraIdList_cb _hidl_cb)  {
     std::vector<hidl_string> deviceNameList;
     for (auto const& deviceNamePair : mCameraDeviceNames) {
+        if (std::stoi(deviceNamePair.first) >= mNumberOfLegacyCameras) {
+            // External camera devices must be reported through the device status change callback,
+            // not in this list.
+            continue;
+        }
         if (mCameraStatusMap[deviceNamePair.first] == CAMERA_DEVICE_STATUS_PRESENT) {
             deviceNameList.push_back(deviceNamePair.second);
         }
@@ -552,10 +580,11 @@ Return<void> CameraProvider::getCameraDeviceInterface_V3_x(
         return Void();
     }
 
-    // ICameraDevice 3.4 or upper
     sp<android::hardware::camera::device::V3_2::implementation::CameraDevice> deviceImpl;
+
+    // ICameraDevice 3.4 or upper
     if (deviceVersion >= kHAL3_4) {
-        ALOGV("Constructing v3.4 camera device");
+        ALOGV("Constructing v3.4+ camera device");
         if (deviceVersion == kHAL3_4) {
             deviceImpl = new android::hardware::camera::device::V3_4::implementation::CameraDevice(
                     mModule, cameraId, mCameraDeviceNames);
