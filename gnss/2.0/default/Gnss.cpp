@@ -20,9 +20,12 @@
 #include <log/log.h>
 #include "AGnss.h"
 #include "AGnssRil.h"
+#include "GnssConfiguration.h"
 #include "GnssMeasurement.h"
+#include "GnssVisibilityControl.h"
 
 using ::android::hardware::Status;
+using ::android::hardware::gnss::visibility_control::V1_0::implementation::GnssVisibilityControl;
 
 namespace android {
 namespace hardware {
@@ -92,8 +95,8 @@ Return<sp<V1_0::IAGnss>> Gnss::getExtensionAGnss() {
 }
 
 Return<sp<V1_0::IGnssNi>> Gnss::getExtensionGnssNi() {
-    // TODO implement
-    return sp<V1_0::IGnssNi>{};
+    // The IGnssNi.hal interface is deprecated in 2.0.
+    return nullptr;
 }
 
 Return<sp<V1_0::IGnssMeasurement>> Gnss::getExtensionGnssMeasurement() {
@@ -181,6 +184,10 @@ Return<bool> Gnss::injectBestLocation(const V1_0::GnssLocation&) {
 }
 
 // Methods from V2_0::IGnss follow.
+Return<sp<V2_0::IGnssConfiguration>> Gnss::getExtensionGnssConfiguration_2_0() {
+    return new GnssConfiguration{};
+}
+
 Return<sp<V2_0::IAGnss>> Gnss::getExtensionAGnss_2_0() {
     return new AGnss{};
 }
@@ -198,6 +205,11 @@ Return<sp<measurement_corrections::V1_0::IMeasurementCorrections>>
 Gnss::getExtensionMeasurementCorrections() {
     // TODO implement
     return sp<measurement_corrections::V1_0::IMeasurementCorrections>{};
+}
+
+Return<sp<visibility_control::V1_0::IGnssVisibilityControl>> Gnss::getExtensionVisibilityControl() {
+    ALOGD("Gnss::getExtensionVisibilityControl");
+    return new GnssVisibilityControl();
 }
 
 Return<bool> Gnss::setCallback_2_0(const sp<V2_0::IGnssCallback>& callback) {
