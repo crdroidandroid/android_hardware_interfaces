@@ -24,6 +24,7 @@ LOCAL_SHARED_LIBRARIES := \
     liblog \
     libutils \
     libcutils\
+    vendor.display.config@1.7 \
     android.hardware.configstore@1.0 \
     android.hardware.configstore@1.1
 
