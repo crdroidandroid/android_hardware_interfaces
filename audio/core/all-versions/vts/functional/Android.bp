@@ -20,9 +20,6 @@ cc_defaults {
     static_libs: [
         "android.hardware.audio.common.test.utility",
         "libaudiopolicycomponents",
-        "libicuuc",
-        "libicuuc_stubdata",
-        "libandroidicu",
         "libmedia_helper",
         "libxml2",
     ],
@@ -73,8 +70,7 @@ cc_test {
     name: "VtsHalAudioV5_0TargetTest",
     defaults: ["VtsHalAudioTargetTest_defaults"],
     srcs: [
-        // for now the tests are the same as V4
-        "4.0/AudioPrimaryHidlHalTest.cpp",
+        "5.0/AudioPrimaryHidlHalTest.cpp",
     ],
     static_libs: [
         "android.hardware.audio@5.0",
