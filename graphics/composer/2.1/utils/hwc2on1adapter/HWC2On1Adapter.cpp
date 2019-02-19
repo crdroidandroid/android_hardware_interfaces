@@ -2368,6 +2368,10 @@ bool HWC2On1Adapter::prepareAllDisplays() {
         for (size_t l = 0; l < displayContents->numHwLayers; ++l) {
             auto& layer = displayContents->hwLayers[l];
             ALOGV("  %zd: %d", l, layer.compositionType);
+            
+            // TODO: find proper fix
+            if (reinterpret_cast<uintptr_t>(layer.handle) == 0xff000000)
+                layer.handle = nullptr;
         }
     }
 
