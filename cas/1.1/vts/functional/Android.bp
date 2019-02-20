@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2017 The Android Open Source Project
+// Copyright (C) 2019 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,17 +15,21 @@
 //
 
 cc_test {
-    name: "VtsHalGnssV1_1TargetTest",
+    name: "VtsHalCasV1_1TargetTest",
     defaults: ["VtsHalTargetTestDefaults"],
-    srcs: [
-        "gnss_hal_test.cpp",
-        "gnss_hal_test_cases.cpp",
-        "VtsHalGnssV1_1TargetTest.cpp",
-    ],
+    srcs: ["VtsHalCasV1_1TargetTest.cpp"],
     static_libs: [
-        "android.hardware.gnss@1.0",
-        "android.hardware.gnss@1.1",
-        "android.hardware.gnss@common-vts-lib",
+        "android.hardware.cas@1.0",
+        "android.hardware.cas@1.1",
+        "android.hardware.cas.native@1.0",
+        "android.hidl.allocator@1.0",
+        "android.hidl.memory@1.0",
+        "libhidlallocatorutils",
+        "libhidlmemory",
+    ],
+    shared_libs: [
+        "libbinder",
     ],
     test_suites: ["general-tests"],
 }
+
