@@ -33,6 +33,9 @@ endif
 ifdef WIFI_HIDL_FEATURE_DISABLE_AP
 LOCAL_CPPFLAGS += -DWIFI_HIDL_FEATURE_DISABLE_AP
 endif
+ifdef WIFI_HIDL_FEATURE_DISABLE_AP_MAC_RANDOMIZATION
+LOCAL_CPPFLAGS += -DWIFI_HIDL_FEATURE_DISABLE_AP_MAC_RANDOMIZATION
+endif
 ifdef QC_WIFI_HIDL_FEATURE_DUAL_AP
 LOCAL_CPPFLAGS += -DQC_WIFI_HIDL_FEATURE_DUAL_AP
 endif
@@ -46,6 +49,7 @@ LOCAL_SRC_FILES := \
     wifi_ap_iface.cpp \
     wifi_chip.cpp \
     wifi_feature_flags.cpp \
+    wifi_iface_util.cpp \
     wifi_legacy_hal.cpp \
     wifi_legacy_hal_stubs.cpp \
     wifi_mode_controller.cpp \
@@ -147,10 +151,13 @@ LOCAL_SRC_FILES := \
     tests/hidl_struct_util_unit_tests.cpp \
     tests/main.cpp \
     tests/mock_wifi_feature_flags.cpp \
+    tests/mock_wifi_iface_util.cpp \
     tests/mock_wifi_legacy_hal.cpp \
     tests/mock_wifi_mode_controller.cpp \
     tests/ringbuffer_unit_tests.cpp \
-    tests/wifi_chip_unit_tests.cpp
+    tests/wifi_ap_iface_unit_tests.cpp \
+    tests/wifi_chip_unit_tests.cpp \
+    tests/wifi_iface_util_unit_tests.cpp
 LOCAL_STATIC_LIBRARIES := \
     libgmock \
     libgtest \
