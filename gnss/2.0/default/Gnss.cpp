@@ -23,13 +23,17 @@
 
 #include "AGnss.h"
 #include "AGnssRil.h"
+#include "GnssBatching.h"
 #include "GnssConfiguration.h"
 #include "GnssMeasurement.h"
+#include "GnssMeasurementCorrections.h"
 #include "GnssVisibilityControl.h"
 #include "Utils.h"
 
 using ::android::hardware::Status;
 using ::android::hardware::gnss::common::Utils;
+using ::android::hardware::gnss::measurement_corrections::V1_0::implementation::
+        GnssMeasurementCorrections;
 using ::android::hardware::gnss::visibility_control::V1_0::implementation::GnssVisibilityControl;
 
 namespace android {
@@ -233,6 +237,11 @@ Return<sp<V2_0::IGnssConfiguration>> Gnss::getExtensionGnssConfiguration_2_0() {
     return new GnssConfiguration{};
 }
 
+Return<sp<V2_0::IGnssDebug>> Gnss::getExtensionGnssDebug_2_0() {
+    // TODO(b/124012850): Implement function.
+    return sp<V2_0::IGnssDebug>{};
+}
+
 Return<sp<V2_0::IAGnss>> Gnss::getExtensionAGnss_2_0() {
     return new AGnss{};
 }
@@ -248,13 +257,17 @@ Return<sp<V2_0::IGnssMeasurement>> Gnss::getExtensionGnssMeasurement_2_0() {
 
 Return<sp<measurement_corrections::V1_0::IMeasurementCorrections>>
 Gnss::getExtensionMeasurementCorrections() {
-    // TODO(b/124012850): Implement function.
-    return sp<measurement_corrections::V1_0::IMeasurementCorrections>{};
+    ALOGD("Gnss::getExtensionMeasurementCorrections");
+    return new GnssMeasurementCorrections();
 }
 
 Return<sp<visibility_control::V1_0::IGnssVisibilityControl>> Gnss::getExtensionVisibilityControl() {
     ALOGD("Gnss::getExtensionVisibilityControl");
     return new GnssVisibilityControl();
+}
+
+Return<sp<V2_0::IGnssBatching>> Gnss::getExtensionGnssBatching_2_0() {
+    return new GnssBatching();
 }
 
 Return<bool> Gnss::setCallback_2_0(const sp<V2_0::IGnssCallback>& callback) {
@@ -266,8 +279,9 @@ Return<bool> Gnss::setCallback_2_0(const sp<V2_0::IGnssCallback>& callback) {
 
     sGnssCallback_2_0 = callback;
 
-    uint32_t capabilities = static_cast<uint32_t>(V1_0::IGnssCallback::Capabilities::MEASUREMENTS);
-    auto ret = sGnssCallback_2_0->gnssSetCapabilitesCb(capabilities);
+    using Capabilities = V2_0::IGnssCallback::Capabilities;
+    const auto capabilities = Capabilities::LOW_POWER_MODE | Capabilities::SATELLITE_BLACKLIST;
+    auto ret = sGnssCallback_2_0->gnssSetCapabilitiesCb_2_0(capabilities);
     if (!ret.isOk()) {
         ALOGE("%s: Unable to invoke callback", __func__);
     }
