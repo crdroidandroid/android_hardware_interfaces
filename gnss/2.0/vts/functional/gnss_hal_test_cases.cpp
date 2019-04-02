@@ -18,6 +18,7 @@
 
 #include <VtsHalHidlTargetTestBase.h>
 #include <gnss_hal_test.h>
+#include "Utils.h"
 
 using android::hardware::hidl_string;
 using android::hardware::hidl_vec;
@@ -31,9 +32,16 @@ using IAGnssRil_2_0 = android::hardware::gnss::V2_0::IAGnssRil;
 using IAGnss_2_0 = android::hardware::gnss::V2_0::IAGnss;
 using IAGnss_1_0 = android::hardware::gnss::V1_0::IAGnss;
 using IAGnssCallback_2_0 = android::hardware::gnss::V2_0::IAGnssCallback;
+using IGnssBatching_V1_0 = android::hardware::gnss::V1_0::IGnssBatching;
+using IGnssBatching_V2_0 = android::hardware::gnss::V2_0::IGnssBatching;
 
+using android::hardware::gnss::common::Utils;
+using android::hardware::gnss::measurement_corrections::V1_0::IMeasurementCorrections;
+using android::hardware::gnss::measurement_corrections::V1_0::MeasurementCorrections;
 using android::hardware::gnss::V1_0::IGnssNi;
 using android::hardware::gnss::V2_0::ElapsedRealtimeFlags;
+using android::hardware::gnss::V2_0::GnssConstellationType;
+using android::hardware::gnss::V2_0::IGnssCallback;
 using android::hardware::gnss::visibility_control::V1_0::IGnssVisibilityControl;
 
 /*
@@ -46,23 +54,21 @@ TEST_F(GnssHalTest, SetupTeardownCreateCleanup) {}
 
 /*
  * TestGnssMeasurementCallback:
- * Gets the GnssMeasurementExtension and verify that it returns an actual extension.
+ * Gets the GnssMeasurementExtension and verifies that it returns an actual extension.
  */
 TEST_F(GnssHalTest, TestGnssMeasurementCallback) {
     auto gnssMeasurement_2_0 = gnss_hal_->getExtensionGnssMeasurement_2_0();
     auto gnssMeasurement_1_1 = gnss_hal_->getExtensionGnssMeasurement_1_1();
     auto gnssMeasurement_1_0 = gnss_hal_->getExtensionGnssMeasurement();
-    ASSERT_TRUE(gnssMeasurement_2_0.isOk() || gnssMeasurement_1_1.isOk() ||
+    ASSERT_TRUE(gnssMeasurement_2_0.isOk() && gnssMeasurement_1_1.isOk() &&
                 gnssMeasurement_1_0.isOk());
-    if (last_capabilities_ & IGnssCallback::Capabilities::MEASUREMENTS) {
-        sp<IGnssMeasurement_2_0> iGnssMeas_2_0 = gnssMeasurement_2_0;
-        sp<IGnssMeasurement_1_1> iGnssMeas_1_1 = gnssMeasurement_1_1;
-        sp<IGnssMeasurement_1_0> iGnssMeas_1_0 = gnssMeasurement_1_0;
-        // At least one interface is non-null.
-        int numNonNull = (int)(iGnssMeas_2_0 != nullptr) + (int)(iGnssMeas_1_1 != nullptr) +
-                         (int)(iGnssMeas_1_0 != nullptr);
-        ASSERT_TRUE(numNonNull >= 1);
-    }
+    sp<IGnssMeasurement_2_0> iGnssMeas_2_0 = gnssMeasurement_2_0;
+    sp<IGnssMeasurement_1_1> iGnssMeas_1_1 = gnssMeasurement_1_1;
+    sp<IGnssMeasurement_1_0> iGnssMeas_1_0 = gnssMeasurement_1_0;
+    // At least one interface is non-null.
+    int numNonNull = (int)(iGnssMeas_2_0 != nullptr) + (int)(iGnssMeas_1_1 != nullptr) +
+                     (int)(iGnssMeas_1_0 != nullptr);
+    ASSERT_TRUE(numNonNull >= 1);
 }
 
 /*
@@ -160,10 +166,13 @@ TEST_F(GnssHalTest, TestAGnssRil_UpdateNetworkState_2_0) {
 }
 
 /*
- * TestGnssMeasurementCodeType:
- * Sets a GnssMeasurementCallback, waits for a measurement, and verifies the codeType is valid.
+ * TestGnssMeasurementFields:
+ * Sets a GnssMeasurementCallback, waits for a measurement, and verifies
+ * 1. codeType is valid,
+ * 2. constellation is valid.
+ * 3. state is valid.
  */
-TEST_F(GnssHalTest, TestGnssMeasurementCodeType) {
+TEST_F(GnssHalTest, TestGnssMeasurementFields) {
     const int kFirstGnssMeasurementTimeoutSeconds = 10;
 
     auto gnssMeasurement = gnss_hal_->getExtensionGnssMeasurement_2_0();
@@ -186,17 +195,23 @@ TEST_F(GnssHalTest, TestGnssMeasurementCodeType) {
     EXPECT_EQ(measurement_called_count_, 1);
     ASSERT_TRUE(last_measurement_.measurements.size() > 0);
     for (auto measurement : last_measurement_.measurements) {
+        // Verify CodeType is valid.
+        ASSERT_NE(measurement.codeType, "");
+
+        // Verify ConstellationType is valid.
+        ASSERT_TRUE(static_cast<uint8_t>(measurement.constellation) >=
+                            static_cast<uint8_t>(GnssConstellationType::UNKNOWN) &&
+                    static_cast<uint8_t>(measurement.constellation) <=
+                            static_cast<uint8_t>(GnssConstellationType::IRNSS));
+
+        // Verify State is valid.
         ASSERT_TRUE(
-                ((int)measurement.codeType >=
-                                (int)IGnssMeasurementCallback_2_0::GnssMeasurementCodeType::A &&
-                        (int)measurement.codeType <=
-                                (int)IGnssMeasurementCallback_2_0::GnssMeasurementCodeType::N) ||
-                (int)measurement.codeType ==
-                        (int)IGnssMeasurementCallback_2_0::GnssMeasurementCodeType::OTHER);
-        if ((int)measurement.codeType ==
-                (int)IGnssMeasurementCallback_2_0::GnssMeasurementCodeType::OTHER) {
-            ASSERT_NE(measurement.otherCodeTypeName, "");
-        }
+                static_cast<uint32_t>(measurement.state) >=
+                        static_cast<uint32_t>(IGnssMeasurementCallback_2_0::GnssMeasurementState::
+                                                      STATE_UNKNOWN) &&
+                static_cast<uint32_t>(measurement.state) <=
+                        static_cast<uint32_t>(IGnssMeasurementCallback_2_0::GnssMeasurementState::
+                                                      STATE_2ND_CODE_LOCK));
     }
 
     iGnssMeasurement->close();
@@ -273,6 +288,60 @@ TEST_F(GnssHalTest, TestGnssVisibilityControlExtension) {
 }
 
 /*
+ * TestGnssMeasurementCorrectionsCapabilities:
+ * If the GnssMeasurementCorrectionsExtension is not null, verifies that the measurement corrections
+ * capabilities are reported and the mandatory LOS_SATS or the EXCESS_PATH_LENGTH
+ * capability flag is set.
+ */
+TEST_F(GnssHalTest, TestGnssMeasurementCorrectionsCapabilities) {
+    // Setup measurement corrections callback.
+    auto measurementCorrections = gnss_hal_->getExtensionMeasurementCorrections();
+    ASSERT_TRUE(measurementCorrections.isOk());
+    sp<IMeasurementCorrections> iMeasurementCorrections = measurementCorrections;
+    if (iMeasurementCorrections == nullptr) {
+        return;
+    }
+
+    sp<IMeasurementCorrectionsCallback> iMeasurementCorrectionsCallback =
+            new GnssMeasurementCorrectionsCallback(*this);
+    iMeasurementCorrections->setCallback(iMeasurementCorrectionsCallback);
+
+    const int kMeasurementCorrectionsCapabilitiesTimeoutSeconds = 5;
+    waitForMeasurementCorrectionsCapabilities(kMeasurementCorrectionsCapabilitiesTimeoutSeconds);
+    ASSERT_TRUE(measurement_corrections_capabilities_called_count_ > 0);
+    using Capabilities = IMeasurementCorrectionsCallback::Capabilities;
+    ASSERT_TRUE((last_measurement_corrections_capabilities_ &
+                 (Capabilities::LOS_SATS | Capabilities::EXCESS_PATH_LENGTH)) != 0);
+}
+
+/*
+ * TestGnssMeasurementCorrections:
+ * If the GnssMeasurementCorrectionsExtension is not null, verifies that it supports the
+ * gnss.measurement_corrections@1.0::IMeasurementCorrections interface by invoking a method.
+ */
+TEST_F(GnssHalTest, TestGnssMeasurementCorrections) {
+    // Verify IMeasurementCorrections is supported.
+    auto measurementCorrections = gnss_hal_->getExtensionMeasurementCorrections();
+    ASSERT_TRUE(measurementCorrections.isOk());
+    sp<IMeasurementCorrections> iMeasurementCorrections = measurementCorrections;
+    if (iMeasurementCorrections == nullptr) {
+        return;
+    }
+
+    sp<IMeasurementCorrectionsCallback> iMeasurementCorrectionsCallback =
+            new GnssMeasurementCorrectionsCallback(*this);
+    iMeasurementCorrections->setCallback(iMeasurementCorrectionsCallback);
+
+    const int kMeasurementCorrectionsCapabilitiesTimeoutSeconds = 5;
+    waitForMeasurementCorrectionsCapabilities(kMeasurementCorrectionsCapabilitiesTimeoutSeconds);
+    ASSERT_TRUE(measurement_corrections_capabilities_called_count_ > 0);
+    // Set a mock MeasurementCorrections.
+    auto result = iMeasurementCorrections->setCorrections(Utils::getMockMeasurementCorrections());
+    ASSERT_TRUE(result.isOk());
+    EXPECT_TRUE(result);
+}
+
+/*
  * TestGnssDataElapsedRealtimeFlags:
  * Sets a GnssMeasurementCallback, waits for a GnssData object, and verifies the flags in member
  * elapsedRealitme are valid.
@@ -299,9 +368,9 @@ TEST_F(GnssHalTest, TestGnssDataElapsedRealtimeFlags) {
     wait(kFirstGnssMeasurementTimeoutSeconds);
     EXPECT_EQ(measurement_called_count_, 1);
 
-    ASSERT_TRUE((int)last_measurement_.elapsedRealtime.flags >= 0 &&
-                (int)last_measurement_.elapsedRealtime.flags <=
-                        (int)ElapsedRealtimeFlags::HAS_TIME_UNCERTAINTY_NS);
+    ASSERT_TRUE((int)last_measurement_.elapsedRealtime.flags <=
+                (int)(ElapsedRealtimeFlags::HAS_TIMESTAMP_NS |
+                      ElapsedRealtimeFlags::HAS_TIME_UNCERTAINTY_NS));
 
     // We expect a non-zero timestamp when set.
     if (last_measurement_.elapsedRealtime.flags & ElapsedRealtimeFlags::HAS_TIMESTAMP_NS) {
@@ -314,9 +383,9 @@ TEST_F(GnssHalTest, TestGnssDataElapsedRealtimeFlags) {
 TEST_F(GnssHalTest, TestGnssLocationElapsedRealtime) {
     StartAndCheckFirstLocation();
 
-    ASSERT_TRUE((int)last_location_.elapsedRealtime.flags >= 0 &&
-                (int)last_location_.elapsedRealtime.flags <=
-                        (int)ElapsedRealtimeFlags::HAS_TIME_UNCERTAINTY_NS);
+    ASSERT_TRUE((int)last_location_.elapsedRealtime.flags <=
+                (int)(ElapsedRealtimeFlags::HAS_TIMESTAMP_NS |
+                      ElapsedRealtimeFlags::HAS_TIME_UNCERTAINTY_NS));
 
     // We expect a non-zero timestamp when set.
     if (last_location_.elapsedRealtime.flags & ElapsedRealtimeFlags::HAS_TIMESTAMP_NS) {
@@ -331,4 +400,21 @@ TEST_F(GnssHalTest, TestInjectBestLocation_2_0) {
     StartAndCheckFirstLocation();
     gnss_hal_->injectBestLocation_2_0(last_location_);
     StopAndClearLocations();
+}
+
+/*
+ * TestGnssBatchingExtension:
+ * Gets the GnssBatchingExtension and verifies that it supports either the @1.0::IGnssBatching
+ * or @2.0::IGnssBatching extension.
+ */
+TEST_F(GnssHalTest, TestGnssBatchingExtension) {
+    auto gnssBatching_V2_0 = gnss_hal_->getExtensionGnssBatching_2_0();
+    ASSERT_TRUE(gnssBatching_V2_0.isOk());
+
+    auto gnssBatching_V1_0 = gnss_hal_->getExtensionGnssBatching();
+    ASSERT_TRUE(gnssBatching_V1_0.isOk());
+
+    sp<IGnssBatching_V1_0> iGnssBatching_V1_0 = gnssBatching_V1_0;
+    sp<IGnssBatching_V2_0> iGnssBatching_V2_0 = gnssBatching_V2_0;
+    ASSERT_TRUE(iGnssBatching_V1_0 != nullptr || iGnssBatching_V2_0 != nullptr);
 }
