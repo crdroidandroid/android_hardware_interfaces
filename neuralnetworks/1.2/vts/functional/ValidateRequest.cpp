@@ -155,8 +155,8 @@ static void validate(const sp<IPreparedModel>& preparedModel, const std::string&
         SCOPED_TRACE(message + " [burst]");
 
         // create burst
-        std::unique_ptr<::android::nn::ExecutionBurstController> burst =
-                ::android::nn::createExecutionBurstController(preparedModel, /*blocking=*/true);
+        std::shared_ptr<::android::nn::ExecutionBurstController> burst =
+                ::android::nn::ExecutionBurstController::create(preparedModel, /*blocking=*/true);
         ASSERT_NE(nullptr, burst.get());
 
         // create memory keys
