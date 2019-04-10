@@ -62,7 +62,8 @@ LOCAL_SHARED_LIBRARIES := \
     libwifi-system-iface \
     android.hardware.wifi@1.0 \
     android.hardware.wifi@1.1 \
-    android.hardware.wifi@1.2
+    android.hardware.wifi@1.2 \
+    vendor.qti.hardware.wifi@1.0
 LOCAL_EXPORT_C_INCLUDE_DIRS := $(LOCAL_PATH)
 include $(BUILD_STATIC_LIBRARY)
 
@@ -93,7 +94,8 @@ LOCAL_SHARED_LIBRARIES := \
     libwifi-system-iface \
     android.hardware.wifi@1.0 \
     android.hardware.wifi@1.1 \
-    android.hardware.wifi@1.2
+    android.hardware.wifi@1.2 \
+    vendor.qti.hardware.wifi@1.0
 LOCAL_STATIC_LIBRARIES := \
     android.hardware.wifi@1.0-service-lib
 LOCAL_INIT_RC := android.hardware.wifi@1.0-service.rc
@@ -129,5 +131,6 @@ LOCAL_SHARED_LIBRARIES := \
     libwifi-system-iface \
     android.hardware.wifi@1.0 \
     android.hardware.wifi@1.1 \
-    android.hardware.wifi@1.2
+    android.hardware.wifi@1.2 \
+    vendor.qti.hardware.wifi@1.0
 include $(BUILD_NATIVE_TEST)

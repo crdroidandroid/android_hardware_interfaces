@@ -360,6 +360,8 @@ class WifiLegacyHal {
     wifi_error QcRemoveInterface(const std::string& iface_name,
                                  const std::string& ifname);
 
+    // others
+    wifi_error setLatencyLevel(const std::string& iface_name, uint32_t level);
 
    private:
     // Retrieve interface handles for all the available interfaces.
