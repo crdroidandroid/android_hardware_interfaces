@@ -112,6 +112,14 @@
         </interface>
     </hal>
     <hal format="hidl" optional="true">
+        <name>android.hardware.broadcastradio</name>
+        <version>2.0</version>
+        <interface>
+            <name>IBroadcastRadio</name>
+            <regex-instance>.*</regex-instance>
+        </interface>
+    </hal>
+    <hal format="hidl" optional="true">
         <name>android.hardware.camera.provider</name>
         <version>2.4-5</version>
         <interface>
@@ -342,8 +350,7 @@
     </hal>
     <hal format="hidl" optional="true">
         <name>android.hardware.radio</name>
-        <!-- Todo<b/123249760> Allow only 1.4 for Q-->
-        <version>1.3-4</version>
+        <version>1.4</version>
         <interface>
             <name>IRadio</name>
             <instance>slot1</instance>
