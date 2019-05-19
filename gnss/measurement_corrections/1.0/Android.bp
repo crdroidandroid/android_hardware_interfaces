@@ -9,16 +9,11 @@ hidl_interface {
     srcs: [
         "types.hal",
         "IMeasurementCorrections.hal",
+        "IMeasurementCorrectionsCallback.hal",
     ],
     interfaces: [
         "android.hardware.gnss@1.0",
         "android.hidl.base@1.0",
-    ],
-    types: [
-        "GnssSingleSatCorrectionFlags",
-        "MeasurementCorrections",
-        "ReflectingPlane",
-        "SingleSatCorrection",
     ],
     gen_java: true,
 }

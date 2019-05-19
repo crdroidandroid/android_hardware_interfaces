@@ -52,7 +52,7 @@ class Composer : public V2_2::vts::Composer {
 
     std::unique_ptr<ComposerClient> createClient();
 
-   protected:
+  protected:
     explicit Composer(const sp<IComposer>& composer);
 
    private:
@@ -95,11 +95,17 @@ class ComposerClient : public V2_2::vts::ComposerClient {
 
     bool getClientTargetSupport_2_3(Display display, uint32_t width, uint32_t height,
                                     PixelFormat format, Dataspace dataspace);
-    std::vector<IComposerClient::DisplayCapability> getDisplayCapabilities(Display display);
+    Error getDisplayCapabilities(
+            Display display,
+            std::vector<IComposerClient::DisplayCapability>* outDisplayCapabilities);
 
     std::vector<IComposerClient::PerFrameMetadataKey> getPerFrameMetadataKeys_2_3(Display display);
 
-   private:
+    bool getDisplayBrightnessSupport(Display display);
+
+    Error setDisplayBrightness(Display display, float brightness);
+
+  private:
     const sp<IComposerClient> mClient;
 };
 

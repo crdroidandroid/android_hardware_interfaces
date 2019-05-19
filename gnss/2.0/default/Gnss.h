@@ -83,6 +83,7 @@ struct Gnss : public IGnss {
 
     // Methods from V2_0::IGnss follow.
     Return<sp<V2_0::IGnssConfiguration>> getExtensionGnssConfiguration_2_0() override;
+    Return<sp<V2_0::IGnssDebug>> getExtensionGnssDebug_2_0() override;
     Return<sp<V2_0::IAGnss>> getExtensionAGnss_2_0() override;
     Return<sp<V2_0::IAGnssRil>> getExtensionAGnssRil_2_0() override;
     Return<sp<V2_0::IGnssMeasurement>> getExtensionGnssMeasurement_2_0() override;
@@ -91,6 +92,7 @@ struct Gnss : public IGnss {
     getExtensionMeasurementCorrections() override;
     Return<sp<visibility_control::V1_0::IGnssVisibilityControl>> getExtensionVisibilityControl()
             override;
+    Return<sp<V2_0::IGnssBatching>> getExtensionGnssBatching_2_0() override;
     Return<bool> injectBestLocation_2_0(const V2_0::GnssLocation& location) override;
 
   private:

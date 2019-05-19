@@ -42,6 +42,20 @@ using common::V1_2::PixelFormat;
 using V2_1::Display;
 using V2_1::Error;
 
+namespace {
+
+bool isIdentityMatrix(const float* matrix) {
+    if (matrix[0] == 1.0 && matrix[1] == 0.0 && matrix[2] == 0.0 && matrix[3] == 0.0 &&
+        matrix[4] == 0.0 && matrix[5] == 1.0 && matrix[6] == 0.0 && matrix[7] == 0.0 &&
+        matrix[8] == 0.0 && matrix[9] == 0.0 && matrix[10] == 1.0 && matrix[11] == 0.0 &&
+        matrix[12] == 0.0 && matrix[13] == 0.0 && matrix[14] == 0.0 && matrix[15] == 1.0) {
+        return true;
+    }
+    return false;
+}
+
+}  // namespace
+
 // HwcHalImpl implements V2_*::hal::ComposerHal on top of hwcomposer2
 template <typename Hal>
 class HwcHalImpl : public V2_2::passthrough::detail::HwcHalImpl<Hal> {
@@ -130,6 +144,16 @@ class HwcHalImpl : public V2_2::passthrough::detail::HwcHalImpl<Hal> {
 
     Error setLayerColorTransform(Display display, Layer layer, const float* matrix) override {
         if (!mDispatch.setLayerColorTransform) {
+            if (isIdentityMatrix(matrix)) {
+                // If an identity matrix is set, then we can remove the layer from client
+                // composition list.
+                mClientCompositionLayers[display].erase(layer);
+                return Error::UNSUPPORTED;
+            }
+            // if setLayerColorTransform is not implemented, per spec we want to make sure the
+            // layer marked as client composition, and thus we maintain a list, and mark all these
+            // layers as client composition later before validate the display.
+            mClientCompositionLayers[display].insert(layer);
             return Error::UNSUPPORTED;
         }
         int32_t err = mDispatch.setLayerColorTransform(mDevice, display, layer, matrix);
@@ -245,7 +269,29 @@ class HwcHalImpl : public V2_2::passthrough::detail::HwcHalImpl<Hal> {
         return static_cast<Error>(err);
     }
 
-   protected:
+    Error getDisplayBrightnessSupport(Display display, bool* outSupport) {
+        if (!mDispatch.getDisplayBrightnessSupport) {
+            return Error::UNSUPPORTED;
+        }
+        bool support = false;
+        int32_t error = mDispatch.getDisplayBrightnessSupport(mDevice, display, &support);
+        *outSupport = support;
+        return static_cast<Error>(error);
+    }
+
+    Error setDisplayBrightness(Display display, float brightness) {
+        if (std::isnan(brightness) || brightness > 1.0f ||
+            (brightness < 0.0f && brightness != -1.0f)) {
+            return Error::BAD_PARAMETER;
+        }
+        if (!mDispatch.setDisplayBrightness) {
+            return Error::UNSUPPORTED;
+        }
+        int32_t error = mDispatch.setDisplayBrightness(mDevice, display, brightness);
+        return static_cast<Error>(error);
+    }
+
+  protected:
     bool initDispatch() override {
         if (!BaseType2_2::initDispatch()) {
             return false;
@@ -265,10 +311,86 @@ class HwcHalImpl : public V2_2::passthrough::detail::HwcHalImpl<Hal> {
                                    &mDispatch.getDisplayCapabilities);
         this->initOptionalDispatch(HWC2_FUNCTION_SET_LAYER_PER_FRAME_METADATA_BLOBS,
                                    &mDispatch.setLayerPerFrameMetadataBlobs);
+        this->initOptionalDispatch(HWC2_FUNCTION_GET_DISPLAY_BRIGHTNESS_SUPPORT,
+                                   &mDispatch.getDisplayBrightnessSupport);
+        this->initOptionalDispatch(HWC2_FUNCTION_SET_DISPLAY_BRIGHTNESS,
+                                   &mDispatch.setDisplayBrightness);
         return true;
     }
 
-   private:
+    int32_t getChangedCompositionTypes(Display display, uint32_t* outTypesCount,
+                                       Layer* outChangedLayers,
+                                       IComposerClient::Composition* outCompositionTypes) override {
+        if (outChangedLayers == nullptr && outCompositionTypes == nullptr) {
+            uint32_t typesCount = 0;
+            int32_t error = BaseType2_1::getChangedCompositionTypesInternal(display, &typesCount,
+                                                                            nullptr, nullptr);
+            if (error != HWC2_ERROR_NONE) {
+                return error;
+            }
+            mChangedLayersCache[display].resize(typesCount);
+            mCompositionTypesCache[display].resize(typesCount);
+            error = BaseType2_1::getChangedCompositionTypesInternal(
+                    display, &typesCount, mChangedLayersCache[display].data(),
+                    mCompositionTypesCache[display].data());
+            if (error != HWC2_ERROR_NONE) {
+                return error;
+            }
+            for (Layer layer : mClientCompositionLayers[display]) {
+                bool exist = false;
+                for (uint32_t i = 0; i < typesCount; ++i) {
+                    if (mChangedLayersCache[display][i] == layer) {
+                        exist = true;
+                        break;
+                    }
+                }
+                if (!exist) {
+                    mChangedLayersCache[display].push_back(layer);
+                    mCompositionTypesCache[display].push_back(IComposerClient::Composition::CLIENT);
+                }
+            }
+            *outTypesCount = mChangedLayersCache[display].size();
+            return error;
+        }
+        for (uint32_t i = 0; i < *outTypesCount; ++i) {
+            if (outChangedLayers != nullptr) {
+                outChangedLayers[i] = mChangedLayersCache[display][i];
+            }
+            if (outCompositionTypes != nullptr) {
+                outCompositionTypes[i] = mCompositionTypesCache[display][i];
+            }
+        }
+        return HWC2_ERROR_NONE;
+    }
+
+    void onLayerDestroyed(Display display, Layer layer) override {
+        if (mClientCompositionLayers.find(display) == mClientCompositionLayers.end()) {
+            return;
+        }
+        mClientCompositionLayers[display].erase(layer);
+    }
+
+    void onBeforeValidateDisplay(Display display) override {
+        if (mClientCompositionLayers.find(display) == mClientCompositionLayers.end()) {
+            return;
+        }
+
+        // clear the cache proactively so that we don't hold too much memory over time.
+        mChangedLayersCache[display].clear();
+        mCompositionTypesCache[display].clear();
+
+        // SET_LAYER_COLOR_TRANSFORM is optional, and thus if it's not implemented, we need to
+        // follow the spec to make sure those layers marked as client composition before validate
+        // the display.
+        if (!mDispatch.setLayerColorTransform) {
+            for (Layer layer : mClientCompositionLayers[display]) {
+                BaseType2_1::setLayerCompositionType(
+                        display, layer, static_cast<int32_t>(IComposerClient::Composition::CLIENT));
+            }
+        }
+    }
+
+  private:
     struct {
         HWC2_PFN_GET_DISPLAY_IDENTIFICATION_DATA getDisplayIdentificationData;
         HWC2_PFN_SET_LAYER_COLOR_TRANSFORM setLayerColorTransform;
@@ -277,6 +399,8 @@ class HwcHalImpl : public V2_2::passthrough::detail::HwcHalImpl<Hal> {
         HWC2_PFN_GET_DISPLAYED_CONTENT_SAMPLE getDisplayedContentSample;
         HWC2_PFN_GET_DISPLAY_CAPABILITIES getDisplayCapabilities;
         HWC2_PFN_SET_LAYER_PER_FRAME_METADATA_BLOBS setLayerPerFrameMetadataBlobs;
+        HWC2_PFN_GET_DISPLAY_BRIGHTNESS_SUPPORT getDisplayBrightnessSupport;
+        HWC2_PFN_SET_DISPLAY_BRIGHTNESS setDisplayBrightness;
     } mDispatch = {};
 
     using BaseType2_2 = V2_2::passthrough::detail::HwcHalImpl<Hal>;
@@ -290,6 +414,9 @@ class HwcHalImpl : public V2_2::passthrough::detail::HwcHalImpl<Hal> {
     using BaseType2_2::getRenderIntents;
     using BaseType2_2::setColorMode_2_2;
     using BaseType2_2::setLayerPerFrameMetadata;
+    std::map<Display, std::set<Layer>> mClientCompositionLayers;
+    std::map<Display, std::vector<Layer>> mChangedLayersCache;
+    std::map<Display, std::vector<IComposerClient::Composition>> mCompositionTypesCache;
 };
 
 }  // namespace detail

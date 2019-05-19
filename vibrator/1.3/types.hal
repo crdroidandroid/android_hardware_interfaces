@@ -13,16 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package android.hardware.configstore@1.2;
 
-struct CieXyz {
-    float X;
-    float Y;
-    float Z;
-};
-struct DisplayPrimaries {
-    CieXyz red;
-    CieXyz green;
-    CieXyz blue;
-    CieXyz white;
+package android.hardware.vibrator@1.3;
+
+import @1.2::Effect;
+
+enum Effect : @1.2::Effect {
+     /**
+      * A soft tick effect meant to be played as a texture.
+      *
+      * A soft, short sensation like the tick of a clock. Unlike regular effects, texture effects
+      * are expected to be played multiple times in quick succession, replicating a specific
+      * texture to the user as a form of haptic feedback.
+      */
+     TEXTURE_TICK
 };

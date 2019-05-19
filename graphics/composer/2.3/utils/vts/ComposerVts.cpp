@@ -177,13 +177,30 @@ Error ComposerClient::getDisplayedContentSample(uint64_t display, uint64_t maxFr
     return error;
 }
 
-std::vector<IComposerClient::DisplayCapability> ComposerClient::getDisplayCapabilities(
-    Display display) {
+Error ComposerClient::getDisplayCapabilities(
+        Display display, std::vector<IComposerClient::DisplayCapability>* outCapabilities) {
     std::vector<IComposerClient::DisplayCapability> capabilities;
-    mClient->getDisplayCapabilities(
-        display, [&](const auto&, const auto& tmpCapabilities) { capabilities = tmpCapabilities; });
+    Error error = Error::NONE;
+    mClient->getDisplayCapabilities(display,
+                                    [&](const auto& tmpError, const auto& tmpCapabilities) {
+                                        error = tmpError;
+                                        *outCapabilities = tmpCapabilities;
+                                    });
 
-    return capabilities;
+    return error;
+}
+
+bool ComposerClient::getDisplayBrightnessSupport(Display display) {
+    bool support = false;
+    mClient->getDisplayBrightnessSupport(display, [&](const auto& error, const auto& tmpSupport) {
+        ASSERT_EQ(Error::NONE, error) << "failed to get brightness support";
+        support = tmpSupport;
+    });
+    return support;
+}
+
+Error ComposerClient::setDisplayBrightness(Display display, float brightness) {
+    return mClient->setDisplayBrightness(display, brightness);
 }
 
 }  // namespace vts

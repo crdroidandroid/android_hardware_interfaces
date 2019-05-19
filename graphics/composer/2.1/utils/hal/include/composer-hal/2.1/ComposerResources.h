@@ -44,7 +44,7 @@ class ComposerHandleImporter {
         if (mMapper3) {
             return true;
         }
-        ALOGW_IF(!mMapper3, "failed to get mapper 3.0 service");
+        ALOGD_IF(!mMapper3, "failed to get mapper 3.0 service, falling back to mapper 2.0");
 
         mMapper2 = mapper::V2_0::IMapper::getService();
         ALOGE_IF(!mMapper2, "failed to get mapper 2.0 service");
@@ -170,7 +170,7 @@ class ComposerHandleCache {
     }
 
     Error lookupCache(uint32_t slot, const native_handle_t** outHandle) {
-        if (slot < mHandles.size()) {
+        if (slot >= 0 && slot < mHandles.size()) {
             *outHandle = mHandles[slot];
             return Error::NONE;
         } else {
@@ -180,7 +180,7 @@ class ComposerHandleCache {
 
     Error updateCache(uint32_t slot, const native_handle_t* handle,
                       const native_handle** outReplacedHandle) {
-        if (slot < mHandles.size()) {
+        if (slot >= 0 && slot < mHandles.size()) {
             auto& cachedHandle = mHandles[slot];
             *outReplacedHandle = cachedHandle;
             cachedHandle = handle;

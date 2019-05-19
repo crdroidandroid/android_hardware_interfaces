@@ -17,11 +17,13 @@
 package android.hardware.media.c2@1.0;
 
 import android.hardware.graphics.bufferqueue@1.0::IGraphicBufferProducer;
+import android.hardware.graphics.bufferqueue@2.0::IGraphicBufferProducer;
 import android.hardware.media.omx@1.0::IGraphicBufferSource;
 
 import IConfigurable;
 import IComponentInterface;
 import IComponentListener;
+import IInputSink;
 import IInputSurface;
 import IInputSurfaceConnection;
 
@@ -127,7 +129,7 @@ interface IComponent {
      */
     setOutputSurface(
             uint64_t blockPoolId,
-            IGraphicBufferProducer surface
+            @2.0::IGraphicBufferProducer surface
         ) generates (
             Status status
         );
@@ -183,7 +185,7 @@ interface IComponent {
      *     null.
      */
     connectToOmxInputSurface(
-            IGraphicBufferProducer producer,
+            @1.0::IGraphicBufferProducer producer,
             IGraphicBufferSource source
         ) generates (
             Status status,
@@ -355,11 +357,19 @@ interface IComponent {
      * Returns the @ref IComponentInterface instance associated to this
      * component.
      *
-     * An @p IConfigurable instance for the component can be obtained by calling
+     * An @ref IConfigurable instance for the component can be obtained by calling
      * IComponentInterface::getConfigurable() on the returned @p intf.
      *
      * @return intf `IComponentInterface` instance. This must not be null.
      */
     getInterface() generates (IComponentInterface intf);
+
+    /**
+     * Returns an @ref IInputSink instance that has the component as the
+     * underlying implementation.
+     *
+     * @return sink `IInputSink` instance.
+     */
+    asInputSink() generates (IInputSink sink);
 };
 

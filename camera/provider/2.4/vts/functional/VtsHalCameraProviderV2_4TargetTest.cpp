@@ -272,6 +272,16 @@ namespace {
         ALOGW("Unexpected HAL status code %d", s);
         return Status::OPERATION_NOT_SUPPORTED;
     }
+
+    void getFirstApiLevel(/*out*/int32_t* outApiLevel) {
+        int32_t firstApiLevel = property_get_int32("ro.product.first_api_level", /*default*/-1);
+        if (firstApiLevel < 0) {
+            firstApiLevel = property_get_int32("ro.build.version.sdk", /*default*/-1);
+        }
+        ASSERT_GT(firstApiLevel, 0); // first_api_level must exist
+        *outApiLevel = firstApiLevel;
+        return;
+    }
 }
 
 // Test environment for camera
@@ -767,7 +777,7 @@ public:
             const ::android::hardware::camera::common::V1_0::helper::CameraMetadata& metadata);
     void verifyStreamCombination(sp<device::V3_5::ICameraDevice> cameraDevice3_5,
             const ::android::hardware::camera::device::V3_4::StreamConfiguration &config3_4,
-            bool expectedStatus);
+            bool expectedStatus, bool expectStreamCombQuery);
     void verifyLogicalCameraResult(const camera_metadata_t* staticMetadata,
             const ::android::hardware::camera::common::V1_0::helper::CameraMetadata& resultMetadata);
 
@@ -782,6 +792,8 @@ public:
     void verifySessionReconfigurationQuery(sp<device::V3_5::ICameraDeviceSession> session3_5,
             camera_metadata* oldSessionParams, camera_metadata* newSessionParams);
 
+    bool isDepthOnly(camera_metadata_t* staticMeta);
+
     static Status getAvailableOutputStreams(camera_metadata_t *staticMeta,
             std::vector<AvailableStream> &outputStreams,
             const AvailableStream *threshold = nullptr);
@@ -793,6 +805,10 @@ public:
             std::unordered_set<std::string> *physicalIds/*out*/);
     static Status getSupportedKeys(camera_metadata_t *staticMeta,
             uint32_t tagId, std::unordered_set<int32_t> *requestIDs/*out*/);
+    static void fillOutputStreams(camera_metadata_ro_entry_t* entry,
+            std::vector<AvailableStream>& outputStreams,
+            const AvailableStream *threshold = nullptr,
+            const int32_t availableConfigOutputTag = 0u);
     static void constructFilteredSettings(const sp<ICameraDeviceSession>& session,
             const std::unordered_set<int32_t>& availableKeys, RequestTemplate reqTemplate,
             android::hardware::camera::common::V1_0::helper::CameraMetadata* defaultSettings/*out*/,
@@ -1358,19 +1374,20 @@ Return<void> CameraHidlTest::DeviceCb::requestStreamBuffers(
         }
 
         hidl_vec<StreamBuffer> tmpRetBuffers(bufReq.numBuffersRequested);
-        for (size_t i = 0; i < bufReq.numBuffersRequested; i++) {
+        for (size_t j = 0; j < bufReq.numBuffersRequested; j++) {
             hidl_handle buffer_handle;
             mParent->allocateGraphicBuffer(stream.width, stream.height,
                     android_convertGralloc1To0Usage(
                             halStream.producerUsage, halStream.consumerUsage),
                     halStream.overrideFormat, &buffer_handle);
 
-            tmpRetBuffers[i] = {stream.id, mNextBufferId, buffer_handle, BufferStatus::OK,
+            tmpRetBuffers[j] = {stream.id, mNextBufferId, buffer_handle, BufferStatus::OK,
                                 nullptr, nullptr};
             mOutstandingBufferIds[idx].insert(std::make_pair(mNextBufferId++, buffer_handle));
         }
         atLeastOneStreamOk = true;
-        bufRets[0].val.buffers(std::move(tmpRetBuffers));
+        bufRets[i].streamId = stream.id;
+        bufRets[i].val.buffers(std::move(tmpRetBuffers));
     }
 
     if (allStreamOk) {
@@ -1477,11 +1494,8 @@ hidl_vec<hidl_string> CameraHidlTest::getCameraDeviceNames(sp<ICameraProvider> p
 // Test devices with first_api_level >= P does not advertise device@1.0
 TEST_F(CameraHidlTest, noHal1AfterP) {
     constexpr int32_t HAL1_PHASE_OUT_API_LEVEL = 28;
-    int32_t firstApiLevel = property_get_int32("ro.product.first_api_level", /*default*/-1);
-    if (firstApiLevel < 0) {
-        firstApiLevel = property_get_int32("ro.build.version.sdk", /*default*/-1);
-    }
-    ASSERT_GT(firstApiLevel, 0); // first_api_level must exist
+    int32_t firstApiLevel = 0;
+    getFirstApiLevel(&firstApiLevel);
 
     // all devices with first API level == 28 and <= 1GB of RAM must set low_ram
     // and thus be allowed to continue using HAL1
@@ -1502,11 +1516,19 @@ TEST_F(CameraHidlTest, noHal1AfterP) {
 }
 
 // Test if ICameraProvider::isTorchModeSupported returns Status::OK
+// Also if first_api_level >= Q torch API must be supported.
 TEST_F(CameraHidlTest, isTorchModeSupported) {
+    constexpr int32_t API_LEVEL_Q = 29;
+    int32_t firstApiLevel = 0;
+    getFirstApiLevel(&firstApiLevel);
+
     Return<void> ret;
     ret = mProvider->isSetTorchModeSupported([&](auto status, bool support) {
         ALOGI("isSetTorchModeSupported returns status:%d supported:%d", (int)status, support);
         ASSERT_EQ(Status::OK, status);
+        if (firstApiLevel >= API_LEVEL_Q) {
+            ASSERT_EQ(true, support);
+        }
     });
     ASSERT_TRUE(ret.isOk());
 }
@@ -2845,14 +2867,24 @@ TEST_F(CameraHidlTest, configureStreamsAvailableOutputs) {
         uint32_t streamConfigCounter = 0;
         for (auto& it : outputStreams) {
             V3_2::Stream stream3_2;
-            bool isJpeg = static_cast<PixelFormat>(it.format) == PixelFormat::BLOB;
+            V3_2::DataspaceFlags dataspaceFlag = 0;
+            switch (static_cast<PixelFormat>(it.format)) {
+                case PixelFormat::BLOB:
+                    dataspaceFlag = static_cast<V3_2::DataspaceFlags>(Dataspace::V0_JFIF);
+                    break;
+                case PixelFormat::Y16:
+                    dataspaceFlag = static_cast<V3_2::DataspaceFlags>(Dataspace::DEPTH);
+                    break;
+                default:
+                    dataspaceFlag = static_cast<V3_2::DataspaceFlags>(Dataspace::UNKNOWN);
+            }
             stream3_2 = {streamId,
                              StreamType::OUTPUT,
                              static_cast<uint32_t>(it.width),
                              static_cast<uint32_t>(it.height),
                              static_cast<PixelFormat>(it.format),
                              GRALLOC1_CONSUMER_USAGE_HWCOMPOSER,
-                             (isJpeg) ? static_cast<V3_2::DataspaceFlags>(Dataspace::V0_JFIF) : 0,
+                             dataspaceFlag,
                              StreamRotation::ROTATION_0};
             ::android::hardware::hidl_vec<V3_2::Stream> streams3_2 = {stream3_2};
             ::android::hardware::camera::device::V3_5::StreamConfiguration config3_5;
@@ -2861,8 +2893,9 @@ TEST_F(CameraHidlTest, configureStreamsAvailableOutputs) {
             createStreamConfiguration(streams3_2, StreamConfigurationMode::NORMAL_MODE,
                                       &config3_2, &config3_4, &config3_5, jpegBufferSize);
             if (session3_5 != nullptr) {
+                bool expectStreamCombQuery = (isLogicalMultiCamera(staticMeta) == Status::OK);
                 verifyStreamCombination(cameraDevice3_5, config3_4,
-                        /*expectedStatus*/ true);
+                        /*expectedStatus*/ true, expectStreamCombQuery);
                 config3_5.streamConfigCounter = streamConfigCounter++;
                 ret = session3_5->configureStreams_3_5(config3_5,
                         [streamId](Status s, device::V3_4::HalStreamConfiguration halConfig) {
@@ -2955,7 +2988,8 @@ TEST_F(CameraHidlTest, configureStreamsInvalidOutputs) {
         createStreamConfiguration(streams, StreamConfigurationMode::NORMAL_MODE,
                                   &config3_2, &config3_4, &config3_5, jpegBufferSize);
         if (session3_5 != nullptr) {
-            verifyStreamCombination(cameraDevice3_5, config3_4, /*expectedStatus*/ false);
+            verifyStreamCombination(cameraDevice3_5, config3_4, /*expectedStatus*/ false,
+                    /*expectStreamCombQuery*/false);
             config3_5.streamConfigCounter = streamConfigCounter++;
             ret = session3_5->configureStreams_3_5(config3_5,
                     [](Status s, device::V3_4::HalStreamConfiguration) {
@@ -3216,7 +3250,7 @@ TEST_F(CameraHidlTest, configureStreamsZSLInputOutputs) {
                                           &config3_2, &config3_4, &config3_5, jpegBufferSize);
                 if (session3_5 != nullptr) {
                     verifyStreamCombination(cameraDevice3_5, config3_4,
-                            /*expectedStatus*/ true);
+                            /*expectedStatus*/ true, /*expectStreamCombQuery*/ false);
                     config3_5.streamConfigCounter = streamConfigCounter++;
                     ret = session3_5->configureStreams_3_5(config3_5,
                             [](Status s, device::V3_4::HalStreamConfiguration halConfig) {
@@ -3415,6 +3449,14 @@ TEST_F(CameraHidlTest, configureStreamsPreviewStillOutputs) {
         castSession(session, deviceVersion, &session3_3, &session3_4, &session3_5);
         castDevice(cameraDevice, deviceVersion, &cameraDevice3_5);
 
+        // Check if camera support depth only
+        if (isDepthOnly(staticMeta)) {
+            free_camera_metadata(staticMeta);
+            ret = session->close();
+            ASSERT_TRUE(ret.isOk());
+            continue;
+        }
+
         outputBlobStreams.clear();
         ASSERT_EQ(Status::OK,
                   getAvailableOutputStreams(staticMeta, outputBlobStreams,
@@ -3459,7 +3501,7 @@ TEST_F(CameraHidlTest, configureStreamsPreviewStillOutputs) {
                                           &config3_2, &config3_4, &config3_5, jpegBufferSize);
                 if (session3_5 != nullptr) {
                     verifyStreamCombination(cameraDevice3_5, config3_4,
-                            /*expectedStatus*/ true);
+                            /*expectedStatus*/ true, /*expectStreamCombQuery*/ false);
                     config3_5.streamConfigCounter = streamConfigCounter++;
                     ret = session3_5->configureStreams_3_5(config3_5,
                             [](Status s, device::V3_4::HalStreamConfiguration halConfig) {
@@ -3554,7 +3596,7 @@ TEST_F(CameraHidlTest, configureStreamsConstrainedOutputs) {
                                   &config3_2, &config3_4, &config3_5);
         if (session3_5 != nullptr) {
             verifyStreamCombination(cameraDevice3_5, config3_4,
-                    /*expectedStatus*/ true);
+                    /*expectedStatus*/ true, /*expectStreamCombQuery*/ false);
             config3_5.streamConfigCounter = streamConfigCounter++;
             ret = session3_5->configureStreams_3_5(config3_5,
                     [streamId](Status s, device::V3_4::HalStreamConfiguration halConfig) {
@@ -3735,6 +3777,14 @@ TEST_F(CameraHidlTest, configureStreamsVideoStillOutputs) {
         castSession(session, deviceVersion, &session3_3, &session3_4, &session3_5);
         castDevice(cameraDevice, deviceVersion, &cameraDevice3_5);
 
+        // Check if camera support depth only
+        if (isDepthOnly(staticMeta)) {
+            free_camera_metadata(staticMeta);
+            ret = session->close();
+            ASSERT_TRUE(ret.isOk());
+            continue;
+        }
+
         outputBlobStreams.clear();
         ASSERT_EQ(Status::OK,
                   getAvailableOutputStreams(staticMeta, outputBlobStreams,
@@ -3779,7 +3829,7 @@ TEST_F(CameraHidlTest, configureStreamsVideoStillOutputs) {
                                           &config3_2, &config3_4, &config3_5, jpegBufferSize);
                 if (session3_5 != nullptr) {
                     verifyStreamCombination(cameraDevice3_5, config3_4,
-                            /*expectedStatus*/ true);
+                            /*expectedStatus*/ true, /*expectStreamCombQuery*/ false);
                     config3_5.streamConfigCounter = streamConfigCounter++;
                     ret = session3_5->configureStreams_3_5(config3_5,
                             [](Status s, device::V3_4::HalStreamConfiguration halConfig) {
@@ -4723,38 +4773,56 @@ TEST_F(CameraHidlTest, providerDeviceStateNotification) {
 Status CameraHidlTest::getAvailableOutputStreams(camera_metadata_t *staticMeta,
         std::vector<AvailableStream> &outputStreams,
         const AvailableStream *threshold) {
+    AvailableStream depthPreviewThreshold = {kMaxPreviewWidth, kMaxPreviewHeight,
+                                             static_cast<int32_t>(PixelFormat::Y16)};
     if (nullptr == staticMeta) {
         return Status::ILLEGAL_ARGUMENT;
     }
 
-    camera_metadata_ro_entry entry;
-    int rc = find_camera_metadata_ro_entry(staticMeta,
-            ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS, &entry);
-    if ((0 != rc) || (0 != (entry.count % 4))) {
+    camera_metadata_ro_entry scalarEntry;
+    camera_metadata_ro_entry depthEntry;
+    int foundScalar = find_camera_metadata_ro_entry(staticMeta,
+            ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS, &scalarEntry);
+    int foundDepth = find_camera_metadata_ro_entry(staticMeta,
+            ANDROID_DEPTH_AVAILABLE_DEPTH_STREAM_CONFIGURATIONS, &depthEntry);
+    if ((0 != foundScalar || (0 != (scalarEntry.count % 4))) &&
+        (0 != foundDepth || (0 != (depthEntry.count % 4)))) {
         return Status::ILLEGAL_ARGUMENT;
     }
 
-    for (size_t i = 0; i < entry.count; i+=4) {
-        if (ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT ==
-                entry.data.i32[i + 3]) {
+    if(foundScalar == 0 && (0 == (scalarEntry.count % 4))) {
+        fillOutputStreams(&scalarEntry, outputStreams, threshold,
+                ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT);
+    }
+
+    if(foundDepth == 0 && (0 == (depthEntry.count % 4))) {
+        fillOutputStreams(&depthEntry, outputStreams, &depthPreviewThreshold,
+                ANDROID_DEPTH_AVAILABLE_DEPTH_STREAM_CONFIGURATIONS_OUTPUT);
+    }
+
+    return Status::OK;
+}
+
+void CameraHidlTest::fillOutputStreams(camera_metadata_ro_entry_t* entry,
+        std::vector<AvailableStream>& outputStreams, const AvailableStream* threshold,
+        const int32_t availableConfigOutputTag) {
+    for (size_t i = 0; i < entry->count; i+=4) {
+        if (availableConfigOutputTag == entry->data.i32[i + 3]) {
             if(nullptr == threshold) {
-                AvailableStream s = {entry.data.i32[i+1],
-                        entry.data.i32[i+2], entry.data.i32[i]};
+                AvailableStream s = {entry->data.i32[i+1],
+                        entry->data.i32[i+2], entry->data.i32[i]};
                 outputStreams.push_back(s);
             } else {
-                if ((threshold->format == entry.data.i32[i]) &&
-                        (threshold->width >= entry.data.i32[i+1]) &&
-                        (threshold->height >= entry.data.i32[i+2])) {
-                    AvailableStream s = {entry.data.i32[i+1],
-                            entry.data.i32[i+2], threshold->format};
+                if ((threshold->format == entry->data.i32[i]) &&
+                        (threshold->width >= entry->data.i32[i+1]) &&
+                        (threshold->height >= entry->data.i32[i+2])) {
+                    AvailableStream s = {entry->data.i32[i+1],
+                            entry->data.i32[i+2], threshold->format};
                     outputStreams.push_back(s);
                 }
             }
         }
-
     }
-
-    return Status::OK;
 }
 
 // Get max jpeg buffer size in android.jpeg.maxSize
@@ -5226,6 +5294,37 @@ void CameraHidlTest::configurePreviewStreams3_4(const std::string &name, int32_t
     ASSERT_TRUE(ret.isOk());
 }
 
+bool CameraHidlTest::isDepthOnly(camera_metadata_t* staticMeta) {
+    camera_metadata_ro_entry scalarEntry;
+    camera_metadata_ro_entry depthEntry;
+
+    int rc = find_camera_metadata_ro_entry(
+        staticMeta, ANDROID_REQUEST_AVAILABLE_CAPABILITIES, &scalarEntry);
+    if (rc == 0) {
+        for (uint32_t i = 0; i < scalarEntry.count; i++) {
+            if (scalarEntry.data.u8[i] == ANDROID_REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE) {
+                return false;
+            }
+        }
+    }
+
+    for (uint32_t i = 0; i < scalarEntry.count; i++) {
+        if (scalarEntry.data.u8[i] == ANDROID_REQUEST_AVAILABLE_CAPABILITIES_DEPTH_OUTPUT) {
+
+            rc = find_camera_metadata_ro_entry(
+                staticMeta, ANDROID_DEPTH_AVAILABLE_DEPTH_STREAM_CONFIGURATIONS, &depthEntry);
+            size_t i = 0;
+            if (rc == 0 && depthEntry.data.i32[i] == static_cast<int32_t>(PixelFormat::Y16)) {
+                // only Depth16 format is supported now
+                return true;
+            }
+            break;
+        }
+    }
+
+    return false;
+}
+
 // Open a device session and configure a preview stream.
 void CameraHidlTest::configurePreviewStream(const std::string &name, int32_t deviceVersion,
         sp<ICameraProvider> provider,
@@ -5316,11 +5415,20 @@ void CameraHidlTest::configurePreviewStream(const std::string &name, int32_t dev
     ASSERT_EQ(Status::OK, rc);
     ASSERT_FALSE(outputPreviewStreams.empty());
 
+    V3_2::DataspaceFlags dataspaceFlag = 0;
+    switch (static_cast<PixelFormat>(outputPreviewStreams[0].format)) {
+        case PixelFormat::Y16:
+            dataspaceFlag = static_cast<V3_2::DataspaceFlags>(Dataspace::DEPTH);
+            break;
+        default:
+            dataspaceFlag = static_cast<V3_2::DataspaceFlags>(Dataspace::UNKNOWN);
+    }
+
     V3_2::Stream stream3_2 = {0, StreamType::OUTPUT,
             static_cast<uint32_t> (outputPreviewStreams[0].width),
             static_cast<uint32_t> (outputPreviewStreams[0].height),
             static_cast<PixelFormat> (outputPreviewStreams[0].format),
-            GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, 0, StreamRotation::ROTATION_0};
+            GRALLOC1_CONSUMER_USAGE_HWCOMPOSER, dataspaceFlag, StreamRotation::ROTATION_0};
     ::android::hardware::hidl_vec<V3_2::Stream> streams3_2 = {stream3_2};
     ::android::hardware::camera::device::V3_2::StreamConfiguration config3_2;
     ::android::hardware::camera::device::V3_4::StreamConfiguration config3_4;
@@ -5445,11 +5553,12 @@ void CameraHidlTest::castSession(const sp<ICameraDeviceSession> &session, int32_
 
 void CameraHidlTest::verifyStreamCombination(sp<device::V3_5::ICameraDevice> cameraDevice3_5,
         const ::android::hardware::camera::device::V3_4::StreamConfiguration &config3_4,
-        bool expectedStatus) {
+        bool expectedStatus, bool expectMethodSupported) {
     if (cameraDevice3_5.get() != nullptr) {
         auto ret = cameraDevice3_5->isStreamCombinationSupported(config3_4,
-                [expectedStatus] (Status s, bool combStatus) {
-                    ASSERT_TRUE((Status::OK == s) || (Status::METHOD_NOT_SUPPORTED == s));
+                [expectedStatus, expectMethodSupported] (Status s, bool combStatus) {
+                    ASSERT_TRUE((Status::OK == s) ||
+                            (!expectMethodSupported && Status::METHOD_NOT_SUPPORTED == s));
                     if (Status::OK == s) {
                         ASSERT_TRUE(combStatus == expectedStatus);
                     }

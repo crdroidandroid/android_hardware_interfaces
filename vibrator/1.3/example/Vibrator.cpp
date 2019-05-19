@@ -56,40 +56,30 @@ Return<bool> Vibrator::supportsAmplitudeControl() {
 }
 
 Return<Status> Vibrator::setAmplitude(uint8_t amplitude) {
+    if (!amplitude) {
+        return Status::BAD_VALUE;
+    }
     ALOGI("Amplitude: %u -> %u\n", mAmplitude, amplitude);
     mAmplitude = amplitude;
     return Status::OK;
 }
 
 Return<void> Vibrator::perform(V1_0::Effect effect, EffectStrength strength, perform_cb _hidl_cb) {
-    return perform_1_1(static_cast<V1_1::Effect_1_1>(effect), strength, _hidl_cb);
+    return perform<decltype(effect)>(effect, strength, _hidl_cb);
 }
 
 // Methods from ::android::hardware::vibrator::V1_1::IVibrator follow.
 
 Return<void> Vibrator::perform_1_1(V1_1::Effect_1_1 effect, EffectStrength strength,
                                    perform_cb _hidl_cb) {
-    return perform_1_2(static_cast<V1_2::Effect>(effect), strength, _hidl_cb);
+    return perform<decltype(effect)>(effect, strength, _hidl_cb);
 }
 
 // Methods from ::android::hardware::vibrator::V1_2::IVibrator follow.
 
-Return<void> Vibrator::perform_1_2(Effect effect, EffectStrength strength, perform_cb _hidl_cb) {
-    uint8_t amplitude;
-    uint32_t ms;
-    Status status;
-
-    ALOGI("Perform: Effect %s\n", effectToName(effect));
-
-    amplitude = strengthToAmplitude(strength);
-    setAmplitude(amplitude);
-
-    ms = effectToMs(effect);
-    status = activate(ms);
-
-    _hidl_cb(status, ms);
-
-    return Void();
+Return<void> Vibrator::perform_1_2(V1_2::Effect effect, EffectStrength strength,
+                                   perform_cb _hidl_cb) {
+    return perform<decltype(effect)>(effect, strength, _hidl_cb);
 }
 
 // Methods from ::android::hardware::vibrator::V1_3::IVibrator follow.
@@ -110,7 +100,47 @@ Return<Status> Vibrator::setExternalControl(bool enabled) {
     }
 }
 
+Return<void> Vibrator::perform_1_3(Effect effect, EffectStrength strength, perform_cb _hidl_cb) {
+    return perform<decltype(effect)>(effect, strength, _hidl_cb);
+}
+
 // Private methods follow.
+
+Return<void> Vibrator::perform(Effect effect, EffectStrength strength, perform_cb _hidl_cb) {
+    uint8_t amplitude;
+    uint32_t ms;
+    Status status = Status::OK;
+
+    ALOGI("Perform: Effect %s\n", effectToName(effect).c_str());
+
+    amplitude = strengthToAmplitude(strength, &status);
+    if (status != Status::OK) {
+        _hidl_cb(status, 0);
+        return Void();
+    }
+    setAmplitude(amplitude);
+
+    ms = effectToMs(effect, &status);
+    if (status != Status::OK) {
+        _hidl_cb(status, 0);
+        return Void();
+    }
+    status = activate(ms);
+
+    _hidl_cb(status, ms);
+
+    return Void();
+}
+
+template <typename T>
+Return<void> Vibrator::perform(T effect, EffectStrength strength, perform_cb _hidl_cb) {
+    auto validRange = hidl_enum_range<T>();
+    if (effect < *validRange.begin() || effect > *std::prev(validRange.end())) {
+        _hidl_cb(Status::UNSUPPORTED_OPERATION, 0);
+        return Void();
+    }
+    return perform(static_cast<Effect>(effect), strength, _hidl_cb);
+}
 
 Status Vibrator::enable(bool enabled) {
     if (mExternalControl) {
@@ -173,17 +203,18 @@ void Vibrator::timerCallback(union sigval sigval) {
     static_cast<Vibrator*>(sigval.sival_ptr)->timeout();
 }
 
-const char* Vibrator::effectToName(Effect effect) {
-    return toString(effect).c_str();
+const std::string Vibrator::effectToName(Effect effect) {
+    return toString(effect);
 }
 
-uint32_t Vibrator::effectToMs(Effect effect) {
+uint32_t Vibrator::effectToMs(Effect effect, Status* status) {
     switch (effect) {
         case Effect::CLICK:
             return 10;
         case Effect::DOUBLE_CLICK:
             return 15;
         case Effect::TICK:
+        case Effect::TEXTURE_TICK:
             return 5;
         case Effect::THUD:
             return 5;
@@ -222,9 +253,11 @@ uint32_t Vibrator::effectToMs(Effect effect) {
         case Effect::RINGTONE_15:
             return 30000;
     }
+    *status = Status::UNSUPPORTED_OPERATION;
+    return 0;
 }
 
-uint8_t Vibrator::strengthToAmplitude(EffectStrength strength) {
+uint8_t Vibrator::strengthToAmplitude(EffectStrength strength, Status* status) {
     switch (strength) {
         case EffectStrength::LIGHT:
             return 128;
@@ -233,6 +266,8 @@ uint8_t Vibrator::strengthToAmplitude(EffectStrength strength) {
         case EffectStrength::STRONG:
             return 255;
     }
+    *status = Status::UNSUPPORTED_OPERATION;
+    return 0;
 }
 
 }  // namespace implementation
