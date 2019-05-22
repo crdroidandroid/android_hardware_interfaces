@@ -801,6 +801,7 @@ std::pair<WifiStatus, sp<IWifiApIface>> WifiChip::createApIfaceInternal() {
         }
         iface_created = true;
     }
+    iface_util_.lock()->setRandomMacAddressIndex(ap_ifaces_.size());
     sp<WifiApIface> iface =
         new WifiApIface(ifname, legacy_hal_, iface_util_, feature_flags_);
     ap_ifaces_.push_back(iface);
