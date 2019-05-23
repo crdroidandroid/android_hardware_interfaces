@@ -29,6 +29,7 @@ using IGnssMeasurement_2_0 = android::hardware::gnss::V2_0::IGnssMeasurement;
 using IGnssMeasurement_1_1 = android::hardware::gnss::V1_1::IGnssMeasurement;
 using IGnssMeasurement_1_0 = android::hardware::gnss::V1_0::IGnssMeasurement;
 using IAGnssRil_2_0 = android::hardware::gnss::V2_0::IAGnssRil;
+using IAGnssRil_1_0 = android::hardware::gnss::V1_0::IAGnssRil;
 using IAGnss_2_0 = android::hardware::gnss::V2_0::IAGnss;
 using IAGnss_1_0 = android::hardware::gnss::V1_0::IAGnss;
 using IAGnssCallback_2_0 = android::hardware::gnss::V2_0::IAGnssCallback;
@@ -53,10 +54,10 @@ using android::hardware::gnss::visibility_control::V1_0::IGnssVisibilityControl;
 TEST_F(GnssHalTest, SetupTeardownCreateCleanup) {}
 
 /*
- * TestGnssMeasurementCallback:
+ * TestGnssMeasurementExtension:
  * Gets the GnssMeasurementExtension and verifies that it returns an actual extension.
  */
-TEST_F(GnssHalTest, TestGnssMeasurementCallback) {
+TEST_F(GnssHalTest, TestGnssMeasurementExtension) {
     auto gnssMeasurement_2_0 = gnss_hal_->getExtensionGnssMeasurement_2_0();
     auto gnssMeasurement_1_1 = gnss_hal_->getExtensionGnssMeasurement_1_1();
     auto gnssMeasurement_1_0 = gnss_hal_->getExtensionGnssMeasurement();
@@ -125,16 +126,21 @@ TEST_F(GnssHalTest, TestGnssConfiguration_setGpsLock_Deprecation) {
  * TestAGnssRilExtension:
  * Gets the AGnssRilExtension and verifies that it returns an actual extension.
  *
- * The GNSS HAL 2.0 implementation must support @2.0::IAGnssRil interface due to the deprecation
- * of framework network API methods needed to support the @1.0::IAGnssRil interface.
- *
- * TODO (b/121287858): Enforce gnss@2.0 HAL package is supported on devices launched with Q or later
+ * If IAGnssRil interface is supported, then the GNSS HAL 2.0 implementation must support
+ * @2.0::IAGnssRil interface due to the deprecation of framework network API methods needed
+ * to support the @1.0::IAGnssRil interface.
  */
 TEST_F(GnssHalTest, TestAGnssRilExtension) {
-    auto agnssRil = gnss_hal_->getExtensionAGnssRil_2_0();
-    ASSERT_TRUE(agnssRil.isOk());
-    sp<IAGnssRil_2_0> iAGnssRil = agnssRil;
-    ASSERT_NE(iAGnssRil, nullptr);
+    auto agnssRil_2_0 = gnss_hal_->getExtensionAGnssRil_2_0();
+    ASSERT_TRUE(agnssRil_2_0.isOk());
+    sp<IAGnssRil_2_0> iAGnssRil_2_0 = agnssRil_2_0;
+    if (iAGnssRil_2_0 == nullptr) {
+        // Verify IAGnssRil 1.0 is not supported.
+        auto agnssRil_1_0 = gnss_hal_->getExtensionAGnssRil();
+        ASSERT_TRUE(agnssRil_1_0.isOk());
+        sp<IAGnssRil_1_0> iAGnssRil_1_0 = agnssRil_1_0;
+        ASSERT_EQ(iAGnssRil_1_0, nullptr);
+    }
 }
 
 /*
@@ -146,7 +152,9 @@ TEST_F(GnssHalTest, TestAGnssRil_UpdateNetworkState_2_0) {
     auto agnssRil = gnss_hal_->getExtensionAGnssRil_2_0();
     ASSERT_TRUE(agnssRil.isOk());
     sp<IAGnssRil_2_0> iAGnssRil = agnssRil;
-    ASSERT_NE(iAGnssRil, nullptr);
+    if (iAGnssRil == nullptr) {
+        return;
+    }
 
     // Update GNSS HAL that a network has connected.
     IAGnssRil_2_0::NetworkAttributes networkAttributes = {
@@ -185,16 +193,17 @@ TEST_F(GnssHalTest, TestGnssMeasurementFields) {
         return;
     }
 
-    sp<IGnssMeasurementCallback_2_0> callback = new GnssMeasurementCallback(*this);
-
+    sp<GnssMeasurementCallback> callback = new GnssMeasurementCallback();
     auto result = iGnssMeasurement->setCallback_2_0(callback, /* enableFullTracking= */ true);
     ASSERT_TRUE(result.isOk());
     EXPECT_EQ(result, IGnssMeasurement_1_0::GnssMeasurementStatus::SUCCESS);
 
-    wait(kFirstGnssMeasurementTimeoutSeconds);
-    EXPECT_EQ(measurement_called_count_, 1);
-    ASSERT_TRUE(last_measurement_.measurements.size() > 0);
-    for (auto measurement : last_measurement_.measurements) {
+    IGnssMeasurementCallback_2_0::GnssData lastMeasurement;
+    ASSERT_TRUE(callback->measurement_cbq_.retrieve(lastMeasurement,
+                                                    kFirstGnssMeasurementTimeoutSeconds));
+    EXPECT_EQ(callback->measurement_cbq_.calledCount(), 1);
+    ASSERT_TRUE(lastMeasurement.measurements.size() > 0);
+    for (auto measurement : lastMeasurement.measurements) {
         // Verify CodeType is valid.
         ASSERT_NE(measurement.codeType, "");
 
@@ -219,44 +228,35 @@ TEST_F(GnssHalTest, TestGnssMeasurementFields) {
 
 /*
  * TestAGnssExtension:
- * Gets the AGnssExtension and verifies that it supports @2.0::IAGnss interface by invoking
- * a method.
+ * Gets the AGnssExtension and verifies that it returns an actual extension.
  *
- * The GNSS HAL 2.0 implementation must support @2.0::IAGnss interface due to the deprecation
- * of framework network API methods needed to support the @1.0::IAGnss interface.
- *
- * TODO (b/121287858): Enforce gnss@2.0 HAL package is supported on devices launched with Q or later
+ * If IAGnss interface is supported, then the GNSS HAL 2.0 implementation must support
+ * @2.0::IAGnss interface due to the deprecation of framework network API methods needed
+ * to support the @1.0::IAGnss interface.
  */
 TEST_F(GnssHalTest, TestAGnssExtension) {
-    // Verify IAGnss 2.0 is supported.
-    auto agnss = gnss_hal_->getExtensionAGnss_2_0();
-    ASSERT_TRUE(agnss.isOk());
-    sp<IAGnss_2_0> iAGnss = agnss;
-    ASSERT_NE(iAGnss, nullptr);
+    auto agnss_2_0 = gnss_hal_->getExtensionAGnss_2_0();
+    ASSERT_TRUE(agnss_2_0.isOk());
+    sp<IAGnss_2_0> iAGnss_2_0 = agnss_2_0;
+    if (iAGnss_2_0 == nullptr) {
+        // Verify IAGnss 1.0 is not supported.
+        auto agnss_1_0 = gnss_hal_->getExtensionAGnss();
+        ASSERT_TRUE(agnss_1_0.isOk());
+        sp<IAGnss_1_0> iAGnss_1_0 = agnss_1_0;
+        ASSERT_EQ(iAGnss_1_0, nullptr);
+        return;
+    }
 
     // Set SUPL server host/port
-    auto result = iAGnss->setServer(IAGnssCallback_2_0::AGnssType::SUPL, "supl.google.com", 7275);
+    auto result =
+            iAGnss_2_0->setServer(IAGnssCallback_2_0::AGnssType::SUPL, "supl.google.com", 7275);
     ASSERT_TRUE(result.isOk());
     EXPECT_TRUE(result);
 }
 
 /*
- * TestAGnssExtension_1_0_Deprecation:
- * Gets the @1.0::IAGnss extension and verifies that it is a nullptr.
- *
- * TODO (b/121287858): Enforce gnss@2.0 HAL package is supported on devices launched with Q or later
- */
-TEST_F(GnssHalTest, TestAGnssExtension_1_0_Deprecation) {
-    // Verify IAGnss 1.0 is not supported.
-    auto agnss_1_0 = gnss_hal_->getExtensionAGnss();
-    ASSERT_TRUE(!agnss_1_0.isOk() || ((sp<IAGnss_1_0>)agnss_1_0) == nullptr);
-}
-
-/*
  * TestGnssNiExtension_Deprecation:
  * Gets the @1.0::IGnssNi extension and verifies that it is a nullptr.
- *
- * TODO (b/121287858): Enforce gnss@2.0 HAL package is supported on devices launched with Q or later
  */
 TEST_F(GnssHalTest, TestGnssNiExtension_Deprecation) {
     // Verify IGnssNi 1.0 is not supported.
@@ -266,22 +266,19 @@ TEST_F(GnssHalTest, TestGnssNiExtension_Deprecation) {
 
 /*
  * TestGnssVisibilityControlExtension:
- * Gets the GnssVisibilityControlExtension and verifies that it supports the
- * gnss.visibility_control@1.0::IGnssVisibilityControl interface by invoking a method.
- *
- * The GNSS HAL 2.0 implementation must support gnss.visibility_control@1.0::IGnssVisibilityControl.
- *
- * TODO (b/121287858): Enforce gnss@2.0 HAL package is supported on devices launched with Q or later
+ * Gets the GnssVisibilityControlExtension and if it is not null, verifies that it supports
+ * the gnss.visibility_control@1.0::IGnssVisibilityControl interface by invoking a method.
  */
 TEST_F(GnssHalTest, TestGnssVisibilityControlExtension) {
-    // Verify IGnssVisibilityControl is supported.
     auto gnssVisibilityControl = gnss_hal_->getExtensionVisibilityControl();
     ASSERT_TRUE(gnssVisibilityControl.isOk());
     sp<IGnssVisibilityControl> iGnssVisibilityControl = gnssVisibilityControl;
-    ASSERT_NE(iGnssVisibilityControl, nullptr);
+    if (iGnssVisibilityControl == nullptr) {
+        return;
+    }
 
     // Set non-framework proxy apps.
-    hidl_vec<hidl_string> proxyApps{"ims.example.com", "mdt.example.com"};
+    hidl_vec<hidl_string> proxyApps{"com.example.ims", "com.example.mdt"};
     auto result = iGnssVisibilityControl->enableNfwLocationAccess(proxyApps);
     ASSERT_TRUE(result.isOk());
     EXPECT_TRUE(result);
@@ -294,7 +291,7 @@ TEST_F(GnssHalTest, TestGnssVisibilityControlExtension) {
  * capability flag is set.
  */
 TEST_F(GnssHalTest, TestGnssMeasurementCorrectionsCapabilities) {
-    if (!(last_capabilities_ & IGnssCallback::Capabilities::MEASUREMENT_CORRECTIONS)) {
+    if (!(gnss_cb_->last_capabilities_ & IGnssCallback::Capabilities::MEASUREMENT_CORRECTIONS)) {
         return;
     }
 
@@ -304,15 +301,15 @@ TEST_F(GnssHalTest, TestGnssMeasurementCorrectionsCapabilities) {
     ASSERT_NE(iMeasurementCorrections, nullptr);
 
     // Setup measurement corrections callback.
-    sp<IMeasurementCorrectionsCallback> iMeasurementCorrectionsCallback =
-            new GnssMeasurementCorrectionsCallback(*this);
-    iMeasurementCorrections->setCallback(iMeasurementCorrectionsCallback);
+    sp<GnssMeasurementCorrectionsCallback> callback = new GnssMeasurementCorrectionsCallback();
+    iMeasurementCorrections->setCallback(callback);
 
     const int kMeasurementCorrectionsCapabilitiesTimeoutSeconds = 5;
-    waitForMeasurementCorrectionsCapabilities(kMeasurementCorrectionsCapabilitiesTimeoutSeconds);
-    ASSERT_TRUE(measurement_corrections_capabilities_called_count_ > 0);
+    callback->capabilities_cbq_.retrieve(callback->last_capabilities_,
+                                         kMeasurementCorrectionsCapabilitiesTimeoutSeconds);
+    ASSERT_TRUE(callback->capabilities_cbq_.calledCount() > 0);
     using Capabilities = IMeasurementCorrectionsCallback::Capabilities;
-    ASSERT_TRUE((last_measurement_corrections_capabilities_ &
+    ASSERT_TRUE((callback->last_capabilities_ &
                  (Capabilities::LOS_SATS | Capabilities::EXCESS_PATH_LENGTH)) != 0);
 }
 
@@ -322,7 +319,7 @@ TEST_F(GnssHalTest, TestGnssMeasurementCorrectionsCapabilities) {
  * gnss.measurement_corrections@1.0::IMeasurementCorrections interface by invoking a method.
  */
 TEST_F(GnssHalTest, TestGnssMeasurementCorrections) {
-    if (!(last_capabilities_ & IGnssCallback::Capabilities::MEASUREMENT_CORRECTIONS)) {
+    if (!(gnss_cb_->last_capabilities_ & IGnssCallback::Capabilities::MEASUREMENT_CORRECTIONS)) {
         return;
     }
 
@@ -332,13 +329,14 @@ TEST_F(GnssHalTest, TestGnssMeasurementCorrections) {
     sp<IMeasurementCorrections> iMeasurementCorrections = measurementCorrections;
     ASSERT_NE(iMeasurementCorrections, nullptr);
 
-    sp<IMeasurementCorrectionsCallback> iMeasurementCorrectionsCallback =
-            new GnssMeasurementCorrectionsCallback(*this);
-    iMeasurementCorrections->setCallback(iMeasurementCorrectionsCallback);
+    sp<GnssMeasurementCorrectionsCallback> callback = new GnssMeasurementCorrectionsCallback();
+    iMeasurementCorrections->setCallback(callback);
 
     const int kMeasurementCorrectionsCapabilitiesTimeoutSeconds = 5;
-    waitForMeasurementCorrectionsCapabilities(kMeasurementCorrectionsCapabilitiesTimeoutSeconds);
-    ASSERT_TRUE(measurement_corrections_capabilities_called_count_ > 0);
+    callback->capabilities_cbq_.retrieve(callback->last_capabilities_,
+                                         kMeasurementCorrectionsCapabilitiesTimeoutSeconds);
+    ASSERT_TRUE(callback->capabilities_cbq_.calledCount() > 0);
+
     // Set a mock MeasurementCorrections.
     auto result = iMeasurementCorrections->setCorrections(Utils::getMockMeasurementCorrections());
     ASSERT_TRUE(result.isOk());
@@ -363,22 +361,23 @@ TEST_F(GnssHalTest, TestGnssDataElapsedRealtimeFlags) {
         return;
     }
 
-    sp<IGnssMeasurementCallback_2_0> callback = new GnssMeasurementCallback(*this);
-
+    sp<GnssMeasurementCallback> callback = new GnssMeasurementCallback();
     auto result = iGnssMeasurement->setCallback_2_0(callback, /* enableFullTracking= */ true);
     ASSERT_TRUE(result.isOk());
     EXPECT_EQ(result, IGnssMeasurement_1_0::GnssMeasurementStatus::SUCCESS);
 
-    wait(kFirstGnssMeasurementTimeoutSeconds);
-    EXPECT_EQ(measurement_called_count_, 1);
+    IGnssMeasurementCallback_2_0::GnssData lastMeasurement;
+    ASSERT_TRUE(callback->measurement_cbq_.retrieve(lastMeasurement,
+                                                    kFirstGnssMeasurementTimeoutSeconds));
+    EXPECT_EQ(callback->measurement_cbq_.calledCount(), 1);
 
-    ASSERT_TRUE((int)last_measurement_.elapsedRealtime.flags <=
+    ASSERT_TRUE((int)lastMeasurement.elapsedRealtime.flags <=
                 (int)(ElapsedRealtimeFlags::HAS_TIMESTAMP_NS |
                       ElapsedRealtimeFlags::HAS_TIME_UNCERTAINTY_NS));
 
     // We expect a non-zero timestamp when set.
-    if (last_measurement_.elapsedRealtime.flags & ElapsedRealtimeFlags::HAS_TIMESTAMP_NS) {
-        ASSERT_TRUE(last_measurement_.elapsedRealtime.timestampNs != 0);
+    if (lastMeasurement.elapsedRealtime.flags & ElapsedRealtimeFlags::HAS_TIMESTAMP_NS) {
+        ASSERT_TRUE(lastMeasurement.elapsedRealtime.timestampNs != 0);
     }
 
     iGnssMeasurement->close();
@@ -387,13 +386,13 @@ TEST_F(GnssHalTest, TestGnssDataElapsedRealtimeFlags) {
 TEST_F(GnssHalTest, TestGnssLocationElapsedRealtime) {
     StartAndCheckFirstLocation();
 
-    ASSERT_TRUE((int)last_location_.elapsedRealtime.flags <=
+    ASSERT_TRUE((int)gnss_cb_->last_location_.elapsedRealtime.flags <=
                 (int)(ElapsedRealtimeFlags::HAS_TIMESTAMP_NS |
                       ElapsedRealtimeFlags::HAS_TIME_UNCERTAINTY_NS));
 
     // We expect a non-zero timestamp when set.
-    if (last_location_.elapsedRealtime.flags & ElapsedRealtimeFlags::HAS_TIMESTAMP_NS) {
-        ASSERT_TRUE(last_location_.elapsedRealtime.timestampNs != 0);
+    if (gnss_cb_->last_location_.elapsedRealtime.flags & ElapsedRealtimeFlags::HAS_TIMESTAMP_NS) {
+        ASSERT_TRUE(gnss_cb_->last_location_.elapsedRealtime.timestampNs != 0);
     }
 
     StopAndClearLocations();
@@ -402,23 +401,16 @@ TEST_F(GnssHalTest, TestGnssLocationElapsedRealtime) {
 // This test only verify that injectBestLocation_2_0 does not crash.
 TEST_F(GnssHalTest, TestInjectBestLocation_2_0) {
     StartAndCheckFirstLocation();
-    gnss_hal_->injectBestLocation_2_0(last_location_);
+    gnss_hal_->injectBestLocation_2_0(gnss_cb_->last_location_);
     StopAndClearLocations();
 }
 
 /*
  * TestGnssBatchingExtension:
- * Gets the GnssBatchingExtension and verifies that it supports either the @1.0::IGnssBatching
- * or @2.0::IGnssBatching extension.
+ * Gets the @2.0::IGnssBatching extension and verifies that it doesn't return an error. Support
+ * for this interface is optional.
  */
 TEST_F(GnssHalTest, TestGnssBatchingExtension) {
-    auto gnssBatching_V2_0 = gnss_hal_->getExtensionGnssBatching_2_0();
-    ASSERT_TRUE(gnssBatching_V2_0.isOk());
-
-    auto gnssBatching_V1_0 = gnss_hal_->getExtensionGnssBatching();
-    ASSERT_TRUE(gnssBatching_V1_0.isOk());
-
-    sp<IGnssBatching_V1_0> iGnssBatching_V1_0 = gnssBatching_V1_0;
-    sp<IGnssBatching_V2_0> iGnssBatching_V2_0 = gnssBatching_V2_0;
-    ASSERT_TRUE(iGnssBatching_V1_0 != nullptr || iGnssBatching_V2_0 != nullptr);
+    auto gnssBatching_2_0 = gnss_hal_->getExtensionGnssBatching_2_0();
+    ASSERT_TRUE(gnssBatching_2_0.isOk());
 }
