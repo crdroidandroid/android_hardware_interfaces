@@ -126,10 +126,13 @@ std::unique_ptr<VehiclePropValue> createSubscriptionsRequest() {
     return result;
 }
 
-std::unique_ptr<VehiclePropValue> createDataMessage(const std::string& bytes) {
-    auto result = createBaseVmsMessage(kMessageTypeSize);
-    result->value.int32Values = hidl_vec<int32_t>{toInt(VmsMessageType::DATA)};
-    result->value.bytes = std::vector<uint8_t>(bytes.begin(), bytes.end());
+std::unique_ptr<VehiclePropValue> createDataMessageWithLayerPublisherInfo(
+        const VmsLayerAndPublisher& layer_publisher, const std::string& vms_packet) {
+    auto result = createBaseVmsMessage(kMessageTypeSize + kLayerAndPublisherSize);
+    result->value.int32Values = hidl_vec<int32_t>{
+            toInt(VmsMessageType::DATA), layer_publisher.layer.type, layer_publisher.layer.subtype,
+            layer_publisher.layer.version, layer_publisher.publisher_id};
+    result->value.bytes = std::vector<uint8_t>(vms_packet.begin(), vms_packet.end());
     return result;
 }
 
@@ -269,27 +272,28 @@ bool hasServiceNewlyStarted(const VehiclePropValue& availability_change) {
 }
 
 VmsSessionStatus parseStartSessionMessage(const VehiclePropValue& start_session,
-                                          const int service_id, const int client_id,
+                                          const int current_service_id, const int current_client_id,
                                           int* new_service_id) {
     if (isValidVmsMessage(start_session) &&
         parseMessageType(start_session) == VmsMessageType::START_SESSION &&
         start_session.value.int32Values.size() == kSessionIdsSize + 1) {
         *new_service_id = start_session.value.int32Values[1];
         const int new_client_id = start_session.value.int32Values[2];
-        if (*new_service_id < std::max(0, service_id)) {
-            *new_service_id = service_id;
-            return VmsSessionStatus::kInvalidServiceId;
-        }
-        if (new_client_id == -1) {
+        if (new_client_id != current_client_id) {
+            // If the new_client_id = -1, it means the service has newly started.
+            // But if it is not -1 and is different than the current client ID, then
+            // it means that the service did not have the correct client ID. In
+            // both these cases, the client should acknowledge with a START_SESSION
+            // message containing the correct client ID. So here, the status is returned as
+            // kNewServerSession.
             return VmsSessionStatus::kNewServerSession;
+        } else {
+            // kAckToCurrentSession is returned if the new client ID is same as the current one.
+            return VmsSessionStatus::kAckToCurrentSession;
         }
-        if (new_client_id == client_id) {
-            return VmsSessionStatus::kAckToNewClientSession;
-        }
-        *new_service_id = service_id;
-        return VmsSessionStatus::kInvalidClientId;
     }
-    *new_service_id = service_id;
+    // If the message is invalid then persist the old service ID.
+    *new_service_id = current_service_id;
     return VmsSessionStatus::kInvalidMessage;
 }
 
