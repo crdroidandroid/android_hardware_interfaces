@@ -155,10 +155,8 @@ bool convertLegacyFeaturesToHidlChipCapabilities(
         }
     }
 
-    // There are no flags for these 3 in the legacy feature set. Adding them to
+    // There are no flags for these in the legacy feature set. Adding this to
     // the set because all the current devices support it.
-    *hidl_caps |= HidlChipCaps::DEBUG_RING_BUFFER_VENDOR_DATA;
-    *hidl_caps |= HidlChipCaps::DEBUG_HOST_WAKE_REASON_STATS;
     *hidl_caps |= HidlChipCaps::DEBUG_ERROR_ALERTS;
     return true;
 }
