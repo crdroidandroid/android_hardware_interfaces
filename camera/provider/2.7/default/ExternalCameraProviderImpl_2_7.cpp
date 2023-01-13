@@ -39,10 +39,10 @@ namespace {
 // "device@<version>/external/<id>"
 const std::regex kDeviceNameRE("device@([0-9]+\\.[0-9]+)/external/(.+)");
 const int kMaxDevicePathLen = 256;
-const char* kDevicePath = "/dev/";
+constexpr char kDevicePath[] = "/dev/";
 constexpr char kPrefix[] = "video";
 constexpr int kPrefixLen = sizeof(kPrefix) - 1;
-constexpr int kDevicePrefixLen = sizeof(kDevicePath) + kPrefixLen + 1;
+constexpr int kDevicePrefixLen = sizeof(kDevicePath) + kPrefixLen - 1;
 
 bool matchDeviceName(int cameraIdOffset, const hidl_string& deviceName, std::string* deviceVersion,
                      std::string* cameraDevicePath) {
