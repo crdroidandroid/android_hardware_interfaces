@@ -39,6 +39,9 @@ cc_defaults {
         "-Wall",
         "-Werror",
     ],
+    lto: {
+        never: true,
+    },
 }
 
 // VTS tests must link to HAL definition libraries statically.
