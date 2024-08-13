@@ -1025,7 +1025,7 @@ status_t HidlUtils::audioTagsToHal(const hidl_vec<AudioTag>& tags, char* halTags
             result = BAD_VALUE;
         }
     }
-    std::string fullHalTags{std::move(halTagsBuffer.str())};
+    std::string fullHalTags{halTagsBuffer.str()};
     strncpy(halTags, fullHalTags.c_str(), AUDIO_ATTRIBUTES_TAGS_MAX_SIZE);
     CONVERT_CHECKED(fullHalTags.length() <= AUDIO_ATTRIBUTES_TAGS_MAX_SIZE ? NO_ERROR : BAD_VALUE,
                     result);

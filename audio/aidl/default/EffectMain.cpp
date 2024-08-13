@@ -38,7 +38,7 @@ static inline std::string config_file_path() {
             candidatePath.append(apexName).append("/etc/").append(kDefaultConfigName);
             LOG(DEBUG) << __func__ << " effect lib path " << candidatePath;
             if (access(candidatePath.c_str(), R_OK) == 0) {
-                return std::move(candidatePath);
+                return candidatePath;
             }
         }
     } else {

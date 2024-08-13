@@ -383,7 +383,7 @@ std::vector<AudioRoute*> Module::getAudioRoutesForAudioPortImpl(int32_t portId) 
 
 Module::Configuration& Module::getConfig() {
     if (!mConfig) {
-        mConfig = std::move(initializeConfig());
+        mConfig = initializeConfig();
     }
     return *mConfig;
 }
