@@ -1429,8 +1429,12 @@ std::pair<WifiChipCapabilities, ndk::ScopedAStatus> WifiChip::getWifiChipCapabil
     std::tie(legacy_status, legacy_chip_capabilities) =
             legacy_hal_.lock()->getWifiChipCapabilities();
     if (legacy_status != legacy_hal::WIFI_SUCCESS) {
-        LOG(ERROR) << "Failed to get chip capabilities from legacy HAL: "
-                   << legacyErrorToString(legacy_status);
+        if (legacy_status == legacy_hal::WIFI_ERROR_NOT_SUPPORTED) {
+            LOG(INFO) << "Wi-Fi chip capabilities are not supported by the legacy HAL";
+        } else {
+            LOG(ERROR) << "Failed to get chip capabilities from legacy HAL: "
+                       << legacyErrorToString(legacy_status);
+        }
         return {WifiChipCapabilities(), createWifiStatusFromLegacyError(legacy_status)};
     }
     WifiChipCapabilities aidl_chip_capabilities;
@@ -1794,7 +1798,7 @@ std::string WifiChip::getFirstActiveWlanIfaceName() {
     }
     // This could happen if the chip call is made before any STA/AP
     // iface is created. Default to wlan0 for such cases.
-    LOG(WARNING) << "No active wlan interfaces in use! Using default";
+    LOG(DEBUG) << "No active wlan interfaces in use yet; using default";
     return getWlanIfaceNameWithType(IfaceType::STA, 0);
 }
 

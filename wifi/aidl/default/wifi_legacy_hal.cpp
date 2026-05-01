@@ -1821,6 +1821,10 @@ wifi_error WifiLegacyHal::retrieveIfaceHandles() {
 wifi_interface_handle WifiLegacyHal::getIfaceHandle(const std::string& iface_name) {
     const auto iface_handle_iter = iface_name_to_handle_.find(iface_name);
     if (iface_handle_iter == iface_name_to_handle_.end()) {
+        if (iface_name_to_handle_.empty()) {
+            LOG(DEBUG) << "Iface handle not ready for " << iface_name;
+            return nullptr;
+        }
         LOG(ERROR) << "Unknown iface name: " << iface_name;
         return nullptr;
     }
