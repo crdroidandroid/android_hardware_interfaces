@@ -15,6 +15,7 @@
  */
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -107,6 +108,11 @@ class HealthLoop {
     std::vector<std::unique_ptr<EventHandler>> event_handlers_;
     int awake_poll_interval_;  // -1 for no epoll timeout
     int wakealarm_wake_interval_;
+
+    // Monotonic (awake-only) timestamp of the last PeriodicChores() run. Lets
+    // periodic chores fire once per awake_poll_interval_ even when frequent epoll
+    // events (e.g. the polled binder fd) prevent a clean epoll_wait() timeout.
+    std::chrono::steady_clock::time_point last_chores_{};
 
     // If set to true, future RegisterEvent() will be rejected. This is to ensure all
     // events are registered before StartLoop().

@@ -120,6 +120,11 @@ void HealthLoop::AdjustWakealarmPeriods(bool charger_online) {
 }
 
 void HealthLoop::PeriodicChores() {
+    // Stamp here (not at the MainLoop call site) so both periodic-chore paths
+    // -- the awake-interval path in MainLoop and the wake-alarm path via
+    // WakeAlarmEvent -- reset the timer. Otherwise a wake-alarm chore would not
+    // update last_chores_ and MainLoop would immediately run a duplicate chore.
+    last_chores_ = std::chrono::steady_clock::now();
     ScheduleBatteryUpdate();
 }
 
@@ -249,16 +254,38 @@ void HealthLoop::MainLoop(void) {
         reject_event_register_ = true;
         size_t eventct = event_handlers_.size();
         struct epoll_event events[eventct];
-        int timeout = awake_poll_interval_;
+        int timeout = awake_poll_interval_;  // -1 means no awake-poll timeout
 
         int mode_timeout;
 
-        /* Don't wait for first timer timeout to run periodic chores */
-        if (!nevents) PeriodicChores();
+        // Run periodic chores on the first iteration, on a clean epoll timeout,
+        // or once the awake poll interval has elapsed in awake (non-suspend)
+        // time. The elapsed-time path matters because the health service polls
+        // its binder fd on this same epoll: routine framework traffic makes
+        // epoll_wait() return events more often than awake_poll_interval_, which
+        // would otherwise starve the !nevents heuristic and leave only the slow
+        // wake alarm to refresh battery state while on battery.
+        auto now = std::chrono::steady_clock::now();
+        bool chore_due = !nevents;
+        if (awake_poll_interval_ >= 0 &&
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - last_chores_).count() >=
+                    awake_poll_interval_) {
+            chore_due = true;
+        }
+        if (chore_due) PeriodicChores();  // PeriodicChores() updates last_chores_
 
         Heartbeat();
 
         mode_timeout = PrepareToWait();
+        // Bound the epoll timeout by the time left until the next chore, but keep
+        // the -1 sentinel (no awake poll) so the mode_timeout fallback applies.
+        if (awake_poll_interval_ >= 0) {
+            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                      std::chrono::steady_clock::now() - last_chores_)
+                                      .count();
+            auto remaining_ms = awake_poll_interval_ - elapsed_ms;
+            timeout = remaining_ms > 0 ? static_cast<int>(remaining_ms) : 0;
+        }
         if (timeout < 0 || (mode_timeout > 0 && mode_timeout < timeout)) timeout = mode_timeout;
         nevents = epoll_wait(epollfd_, events, eventct, timeout);
         if (nevents == -1) {
