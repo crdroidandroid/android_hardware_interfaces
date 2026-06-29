@@ -432,8 +432,4 @@ void Health::OnInit(HalHealthLoop* hal_health_loop, struct healthd_config* confi
 // Unlike hwbinder, for binder, there's no need to explicitly call flushCommands()
 // in PrepareToWait(). See b/139697085.
 
-void Health::UpdateChargerPresence(const char* const device_name) {
-    battery_monitor_.updateChargerPresence(device_name);
-}
-
 }  // namespace aidl::android::hardware::health

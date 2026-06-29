@@ -104,19 +104,6 @@ class Health : public BnHealth, public HalHealthLoopCallback {
     int32_t getFullChargeUah() const;
     int32_t getFullChargeDesignCapacityUah() const;
 
-    // Check for the presence of a charger device with the given name
-    // (where device_name may be the name of a directory in
-    // /sys/class/power_supply/), and either stop considering it as a power
-    // source if absent, or start considering it as a power source if present.
-    //
-    // Normally power supplies are scanned once when OnInit() is called, but if
-    // a power supply may appear or go away at runtime this allows those system
-    // changes to be handled.
-    //
-    // If device_name is present in config.ignoredPowerSupplyNames, it will
-    // always be considered absent.
-    void UpdateChargerPresence(const char* const device_name);
-
   private:
     friend LinkedCallback;  // for exposing death_recipient_
 
