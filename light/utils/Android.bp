@@ -30,8 +30,10 @@ cc_binary {
     init_rc: ["blank_screen.rc"],
     srcs: ["main.cpp"],
     shared_libs: [
+        "android.hardware.light@2.0",
         "libbase",
         "libbinder",
+        "libhidlbase",
         "libutils",
     ],
     static_libs: [
