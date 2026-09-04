@@ -121,6 +121,7 @@ vintf_compatibility_matrix {
         "compatibility_matrix.6.android17.xml",
     ],
     kernel_configs: [
+        "kernel_config_s_4.14",
         "kernel_config_s_4.19",
         "kernel_config_s_5.4",
         "kernel_config_s_5.10",
@@ -134,6 +135,7 @@ vintf_compatibility_matrix {
         "compatibility_matrix.7.xml",
     ],
     kernel_configs: [
+        "kernel_config_t_4.14",
         "kernel_config_t_4.19",
         "kernel_config_t_5.4",
         "kernel_config_t_5.10",
