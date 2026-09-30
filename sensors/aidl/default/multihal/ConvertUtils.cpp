@@ -116,7 +116,6 @@ void convertToHidlEvent(const AidlEvent& aidlEvent, V2_1Event* hidlEvent) {
         case AidlSensorType::HEART_BEAT:
         case AidlSensorType::LOW_LATENCY_OFFBODY_DETECT:
         case AidlSensorType::HINGE_ANGLE:
-        case AidlSensorType::MOISTURE_INTRUSION:
             hidlEvent->u.scalar = aidlEvent.payload.get<Event::EventPayload::scalar>();
             break;
         case AidlSensorType::STEP_COUNTER:
@@ -309,7 +308,6 @@ void convertToAidlEvent(const V2_1Event& hidlEvent, AidlEvent* aidlEvent) {
         case AidlSensorType::HEART_BEAT:
         case AidlSensorType::LOW_LATENCY_OFFBODY_DETECT:
         case AidlSensorType::HINGE_ANGLE:
-        case AidlSensorType::MOISTURE_INTRUSION:
             aidlEvent->payload.set<Event::EventPayload::scalar>(hidlEvent.u.scalar);
             break;
         case AidlSensorType::STEP_COUNTER:
